@@ -1,6 +1,7 @@
 // pages/api/generate-test-paper-pdf.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import puppeteer from 'puppeteer';
+import chromium from '@sparticuz/chromium';
+import type { Browser } from 'puppeteer-core';
 
 interface TestPaperData {
     General_Instructions?: string;
@@ -32,7 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    let browser;
+    let browser: Browser | null = null;
     try {
         const {
             data,
@@ -58,16 +59,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             schoolLogoBase64
         );
 
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu'
-            ]
-        });
+        const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+
+        if (isProduction) {
+            const executablePath = await chromium.executablePath();
+
+            if (!executablePath) {
+                throw new Error('Chromium executable path not found');
+            }
+
+            const puppeteerCore = (await import('puppeteer-core')).default;
+
+            browser = await puppeteerCore.launch({
+                args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
+                executablePath,
+                headless: true
+            });
+        } else {
+            const puppeteer = (await import('puppeteer')).default;
+
+            browser = await puppeteer.launch({
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu'
+                ]
+            });
+        }
 
         const page = await browser.newPage();
 
