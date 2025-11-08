@@ -60,6 +60,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
+        // Wait for fonts to load, especially for Hindi/Devanagari fonts
+        try {
+            await page.evaluate(async () => {
+                // Wait for document fonts to be ready
+                if ((document as any).fonts && (document as any).fonts.ready) {
+                    await (document as any).fonts.ready;
+                }
+                
+                // Load specific fonts to ensure they're available
+                const fonts = [
+                    '12pt "Noto Sans Devanagari"',
+                    '12pt "Noto Serif Devanagari"'
+                ];
+                
+                if ((document as any).fonts && (document as any).fonts.load) {
+                    await Promise.all(
+                        fonts.map(font => {
+                            try {
+                                return (document as any).fonts.load(font);
+                            } catch (e) {
+                                return Promise.resolve();
+                            }
+                        })
+                    );
+                }
+                
+                // Additional wait to ensure fonts are fully loaded and rendered
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            });
+        } catch (error) {
+            console.warn('Font loading warning:', error);
+            // Continue anyway - fonts might still work
+            await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+        }
+
         // Check if there's any math content and wait accordingly
         const hasMathContent = await page.evaluate(() => {
             const mathElements = document.querySelectorAll('.math-content');
@@ -369,11 +404,14 @@ function generateHTML(
 
     return `
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lesson Plan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
@@ -385,11 +423,13 @@ function generateHTML(
         }
 
         body {
-            font-family: 'Times New Roman', Times, serif;
+            font-family: 'Noto Sans Devanagari', 'Noto Serif Devanagari', 'Times New Roman', Times, serif;
             font-size: 12pt;
             line-height: 1.6;
             color: #000;
             background: white;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .page-container {
