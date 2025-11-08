@@ -157,7 +157,13 @@ const MobileLessonHistory: React.FC<MobileLessonHistoryProps> = ({
 
             Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
                 if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1]; // Last item is the latest
+                    // Sort items by date to ensure latest is last (chronological order: oldest to newest)
+                    const sortedItems = [...items].sort((a, b) => {
+                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                        return dateA - dateB; // Oldest first, newest last
+                    });
+                    const latestItem = sortedItems[sortedItems.length - 1]; // Last item is the latest
                     const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date());
                     if (itemDate > mostRecentDate) {
                         mostRecentDate = itemDate;
@@ -232,18 +238,51 @@ const MobileLessonHistory: React.FC<MobileLessonHistoryProps> = ({
         setExpandedThreads(newExpanded);
     };
 
-    const formatDate = (dateString: string) => {
+    const formatDate = (dateString: string): string => {
         try {
-            const date = new Date(dateString);
-            return date.toLocaleString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            });
-        } catch {
-            return "Invalid date";
+            if (!dateString || dateString.trim() === '') {
+                return 'Unknown date';
+            }
+            
+            // Ensure the date string is treated as UTC
+            let date: Date;
+            
+            // Check if it already has timezone indicator (Z or +/-)
+            if (dateString.endsWith('Z') || dateString.includes('+') || (dateString.includes('-') && dateString.lastIndexOf('-') > 10)) {
+                // Already has timezone info
+                date = new Date(dateString);
+            } else if (dateString.includes('T')) {
+                // ISO format but no timezone - treat as UTC by adding Z
+                date = new Date(dateString + 'Z');
+            } else {
+                // Other format without timezone - assume UTC
+                date = new Date(dateString + ' UTC');
+            }
+            
+            const now = new Date();
+            const diffMs = now.getTime() - date.getTime();
+            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+            if (diffDays > 0) {
+                // Display in local timezone
+                return date.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })
+            } else if (diffHrs > 0) {
+                return `${diffHrs}h ${diffMins}m ago`
+            } else if (diffMins > 0) {
+                return `${diffMins}m ago`
+            } else {
+                return "Just now"
+            }
+        } catch (error) {
+            console.error('Error formatting date:', error, 'Date string:', dateString);
+            return dateString;
         }
     };
 
@@ -370,9 +409,16 @@ const MobileLessonHistory: React.FC<MobileLessonHistoryProps> = ({
                             Object.entries(history).map(([threadId, items]) => {
                                 if (!Array.isArray(items) || items.length === 0) return null;
                                 
-                                const latestItem = items[items.length - 1]; // Last item is the latest
+                                // Sort items by date to ensure latest is last (chronological order: oldest to newest)
+                                const sortedItems = [...items].sort((a, b) => {
+                                    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                                    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                                    return dateA - dateB; // Oldest first, newest last
+                                });
+                                
+                                const latestItem = sortedItems[sortedItems.length - 1]; // Last item is the latest
                                 const isExpanded = expandedThreads.has(threadId);
-                                const hasMultipleVersions = items.length > 1;
+                                const hasMultipleVersions = sortedItems.length > 1;
                                 const chapterOrTopicName = getChapterOrTopicName(latestItem.user_inputs);
                                 const subjectName = getSubjectName(latestItem.user_inputs);
                                 const isSelected = selectedItem === latestItem.execution_id;
@@ -443,9 +489,12 @@ const MobileLessonHistory: React.FC<MobileLessonHistoryProps> = ({
 
                                                         {/* Version Badge */}
                                                         {hasMultipleVersions && (
-                                                            <div className="mb-2">
-                                                                <span className="bg-indigo-100 px-2 py-1 rounded text-xs text-indigo-700">
-                                                                    {items.length} version{items.length > 1 ? 's' : ''}
+                                                            <div className="mb-2 flex items-center gap-2">
+                                                                <span className="bg-indigo-100 px-2 py-1 rounded text-xs text-indigo-700 font-semibold">
+                                                                    Latest Version
+                                                                </span>
+                                                                <span className="text-xs text-gray-500">
+                                                                    ({sortedItems.length} version{sortedItems.length > 1 ? 's' : ''})
                                                                 </span>
                                                             </div>
                                                         )}
@@ -486,11 +535,12 @@ const MobileLessonHistory: React.FC<MobileLessonHistoryProps> = ({
                                         {/* Version Dropdown */}
                                         {isExpanded && hasMultipleVersions && (
                                             <div className="ml-6 space-y-2 border-l-2 border-indigo-200 pl-4">
-                                                {items.slice(0, -1).reverse().map((item, index) => {
+                                                {sortedItems.slice(0, -1).reverse().map((item, index) => {
                                                     const itemChapterOrTopicName = getChapterOrTopicName(item.user_inputs);
                                                     const itemSubjectName = getSubjectName(item.user_inputs);
                                                     const itemIsSelected = selectedItem === item.execution_id;
-                                                    const versionNumber = index + 1; // Version 1 is most recent previous, Version 2 is next, etc.
+                                                    // Version 1 is the most recent previous (second newest), Version 2 is next oldest, etc.
+                                                    const versionNumber = index + 1;
                                                     const itemPrimaryDisplayField = getPrimaryDisplayField(item.user_inputs);
 
                                                     return (

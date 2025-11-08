@@ -17,6 +17,7 @@ import { RatingProvider } from "@/components/Content/RatingContext"
 import SupportButton from "../SupportBtn"
 import ContactPopup from "../ContactPopup"
 import { LessonPlannerLoader } from "./LessonPlannerLoader"
+import PopupLoader from "@/components/PopupLoader"
 
 interface AgentInput {
     variable: string
@@ -219,7 +220,6 @@ export default function LessonPlannerScreen() {
                 }
             } else {
                 console.warn("No valid input data found in history response")
-                console.log("Available keys in data:", Object.keys(data))
             }
 
             // Process agent outputs
@@ -560,7 +560,7 @@ export default function LessonPlannerScreen() {
                             </div>
                         </div>
                         <div className="flex items-center gap-1 xs:gap-2 sm:gap-6 flex-shrink-0">
-                            
+
                             <CreditsDisplay
                                 className="relative top-0 right-0 text-xs xs:text-xs sm:text-sm"
                                 refreshInterval={5 * 60 * 1000}
@@ -601,34 +601,35 @@ export default function LessonPlannerScreen() {
                         </div>
 
                         {/* Main Content Area */}
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 overflow-visible">                            
                             {/* Form Section */}
                             <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-4 sm:mb-6">
                                 {agent && <DynamicAgentForm ref={formRef} agentData={agent} onResponse={handleFormResponse} Detailed_description={agent.Detailed_description} />}
                             </div>
 
                             {/* Response Section */}
-                            <div ref={formattedResponseRef} className="w-full">
-                                {response && (
-                                    <FormattedResponse
-                                        key={`formatted-response-${currentExecutionToken || "new"}`}
-                                        response={response}
-                                        executionToken={currentExecutionToken}
-                                        agent_id={currentagent_id}
-                                        onSave={handleSaveComplete}
-                                        formRef={formRef}
-                                        historicalRating={historicalRating}
-                                        historicalFeedback={historicalFeedback}
-                                        isHistoricalView={isHistoricalView}
-                                        chapterOrTopicName={currentChapterOrTopicName}
-                                    />
-                                )}
+                            <div ref={formattedResponseRef} className="w-full overflow-visible">                                {response && (
+                                <FormattedResponse
+                                    key={`formatted-response-${currentExecutionToken || "new"}`}
+                                    response={response}
+                                    executionToken={currentExecutionToken}
+                                    agent_id={currentagent_id}
+                                    onSave={handleSaveComplete}
+                                    formRef={formRef}
+                                    historicalRating={historicalRating}
+                                    historicalFeedback={historicalFeedback}
+                                    isHistoricalView={isHistoricalView}
+                                    chapterOrTopicName={currentChapterOrTopicName}
+                                />
+                            )}
                             </div>
                         </div>
                     </div>
                 </div>
             </RatingProvider>
             <ContactPopup isOpen={showContactPopup} onClose={() => setShowContactPopup(false)} trigger="credits" />
+            {/* Global loader while loading historical data */}
+            <PopupLoader open={isLoadingHistory} label="Loading history…" />
         </main>
     )
 }

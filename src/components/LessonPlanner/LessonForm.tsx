@@ -916,8 +916,6 @@ const DynamicAgentForm = forwardRef(({ agentData, onResponse, Detailed_descripti
         apiParams.Topic = formData.Topic
       }
 
-      console.log("Submitting API params:", apiParams)
-
       const apiParamsArray = [apiParams]
       formDataToSend.append("api_params", JSON.stringify(apiParamsArray))
 
