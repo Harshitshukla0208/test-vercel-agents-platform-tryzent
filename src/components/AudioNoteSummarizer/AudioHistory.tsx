@@ -253,31 +253,34 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
 
             const now = new Date();
             const diffMs = now.getTime() - parsedDate.getTime();
-            const diffMins = Math.floor(diffMs / (1000 * 60));
-            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-            if (diffMs >= 0 && diffMins < 1) {
+            if (diffMs < 0) {
                 return 'Just now';
             }
 
-            if (diffMs >= 0 && diffHrs < 1) {
-                return `${diffMins}m ago`;
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffMinsTotal = Math.floor(diffMs / (1000 * 60));
+            const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+            if (diffDays > 0) {
+                return parsedDate.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                });
             }
 
-            if (diffMs >= 0 && diffDays < 1) {
-                const remainingMins = diffMins % 60;
-                return `${diffHrs}h${remainingMins ? ` ${remainingMins}m` : ''} ago`;
+            if (diffHrs > 0) {
+                return `${diffHrs}h ${diffMins}m ago`;
             }
 
-            return parsedDate.toLocaleString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-            });
+            if (diffMinsTotal > 0) {
+                return `${diffMinsTotal}m ago`;
+            }
+
+            return 'Just now';
         } catch (error) {
             console.error('Error formatting date:', error, 'Date string:', dateString);
             return dateString;

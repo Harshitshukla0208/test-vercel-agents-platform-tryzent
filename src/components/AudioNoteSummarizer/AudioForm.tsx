@@ -11,7 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { useRating } from "../Content/RatingContext";
 import Cookies from "js-cookie";
 import { useRouter } from 'next/navigation';
-import { CheckSquare, FileAudio, FileText, Hash, Heart, MessageSquare, Play, Settings, Tag, Target, Upload, Users, Volume2 } from "lucide-react";
+import { CheckSquare, FileAudio, FileText, Hash, Heart, MessageSquare, Play, Settings, Tag, Target, Upload, Users, Volume2, X } from "lucide-react";
 
 interface AgentInput {
     variable: string;
@@ -203,7 +203,6 @@ const AudioForm = forwardRef(({ agentData, onResponse, Detailed_description }: D
                 setS3FileUrls({});
             }
 
-
             // Create a new form data object starting fresh
             const newFormData: { [key: string]: string | boolean | number } = {
                 Structured_Output: true // Always ensure this is true
@@ -363,7 +362,20 @@ const AudioForm = forwardRef(({ agentData, onResponse, Detailed_description }: D
         }));
     };
 
+    const removeHistoricalFile = (variable: string) => {
+        setS3FileUrls((prev) => {
+            if (!prev[variable]) return prev;
+            const updated = { ...prev };
+            delete updated[variable];
+            return updated;
+        });
+    };
+
     const handleFileChange = (variable: string, file: File | null) => {
+        if (file) {
+            removeHistoricalFile(variable);
+        }
+
         setFileData((prev) => ({
             ...prev,
             [variable]: file
@@ -734,7 +746,6 @@ const AudioForm = forwardRef(({ agentData, onResponse, Detailed_description }: D
                                         const selectedFile = fileData[input.variable];
                                         const s3Url = s3FileUrls[input.variable];
                                         const previewUrl = filePreviewUrls[input.variable];
-                                        const hasHistoricalFile = Boolean(s3Url);
 
                                         return (
                                             <div key={`file-${input.variable}-${index}`} className="space-y-3 sm:space-y-4">
@@ -742,8 +753,8 @@ const AudioForm = forwardRef(({ agentData, onResponse, Detailed_description }: D
                                                     {formattedLabel} {input.Required && <span className="text-red-500">*</span>}
                                                 </Label>
 
-                                                {/* Enhanced Upload Area - Only show if no file is selected and no historical file */}
-                                                {!hasHistoricalFile && !selectedFile && (
+                                                {/* Enhanced Upload Area - Only show if no new file is selected */}
+                                                {!selectedFile && (
                                                     <div className="relative">
                                                         <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 sm:p-5 text-center hover:border-blue-400 transition-colors duration-200 bg-gray-50 hover:bg-blue-50">
                                                             <input
@@ -859,9 +870,25 @@ const AudioForm = forwardRef(({ agentData, onResponse, Detailed_description }: D
                                                 {/* Historical S3 File Display */}
                                                 {s3Url && (
                                                     <div className="p-3 sm:p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                                        <div className="flex items-center gap-2 mb-2 sm:mb-3">
-                                                            <FileAudio className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
-                                                            <span className="text-xs sm:text-sm font-medium text-blue-800">Previous File</span>
+                                                        <div className="flex items-start justify-between gap-2 mb-2 sm:mb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <FileAudio className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
+                                                                <span className="text-xs sm:text-sm font-medium text-blue-800">Previous File</span>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                className="text-gray-500 hover:text-red-600 transition-colors duration-200"
+                                                                onClick={() => {
+                                                                    removeHistoricalFile(input.variable);
+                                                                    const fileInput = document.getElementById(`file-${input.variable}`) as HTMLInputElement;
+                                                                    if (fileInput) {
+                                                                        fileInput.value = '';
+                                                                    }
+                                                                }}
+                                                                aria-label="Remove previous file"
+                                                            >
+                                                                <X className="w-4 h-4" />
+                                                            </button>
                                                         </div>
 
                                                         {isAudioFile(s3Url) && (
