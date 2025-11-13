@@ -1,10 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { RefreshCcw, Clock, Utensils, ChevronDown, Plus, BookOpen } from "lucide-react"
 import { usePathname, useSearchParams } from "next/navigation"
 import HistorySkeletonLoader from "@/components/Content/HistoryComponentSkeleton"
+import PopupLoader from "@/components/PopupLoader"
 
 interface VariableInput {
   variable: string
@@ -38,6 +39,8 @@ interface DietHistorySidebarProps {
   containerRef?: React.RefObject<HTMLDivElement | null>
   refreshTrigger?: number
   onCreateNew?: () => void
+  selectedExecutionId?: string
+  preventAutoSelect?: boolean
 }
 
 const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
@@ -45,15 +48,18 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
   containerRef,
   refreshTrigger,
   onCreateNew,
+  selectedExecutionId,
+  preventAutoSelect = false,
 }) => {
   const [history, setHistory] = useState<ThreadGroup>({})
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedItem, setSelectedItem] = useState<string | null>(null)
+  const [internalSelectedItem, setInternalSelectedItem] = useState<string | null>(null)
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
   const [maxHeight, setMaxHeight] = useState<string>("920px")
   const sidebarRef = useRef<HTMLDivElement>(null)
   const shouldAutoSelectRef = useRef<boolean>(false)
+  const [showHistoryLoader, setShowHistoryLoader] = useState(false)
 
   // Safe navigation hooks usage
   const searchParams = useSearchParams()
@@ -136,6 +142,13 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
             ...item
           })) as HistoryItem[]
           
+          // Sort items by date (newest first) - latest on top
+          processedItems.sort((a, b) => {
+            const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime()
+            const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime()
+            return dateB - dateA // Descending order (newest first)
+          })
+          
           processedData[threadId] = processedItems
           console.log(`Thread ${threadId} processed:`, processedItems.length, "items")
         }
@@ -166,9 +179,37 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
     }
   }, [refreshTrigger, agent_id])
 
+  useEffect(() => {
+    if (selectedExecutionId === undefined) return
+    if (selectedExecutionId === "") {
+      setInternalSelectedItem(null)
+      return
+    }
+    setInternalSelectedItem(selectedExecutionId)
+  }, [selectedExecutionId])
+
+  const loadHistoryItem = useCallback((execution_id: string, agentId: string) => {
+    if (!agentId || !execution_id) return
+
+    setShowHistoryLoader(true)
+    Promise.resolve(onHistoryItemClick(execution_id, agentId))
+      .catch((error) => {
+        console.error("Error loading history item:", error)
+      })
+      .finally(() => setShowHistoryLoader(false))
+  }, [onHistoryItemClick])
+
   // Auto-select latest item only when user triggered (refreshTrigger)
   useEffect(() => {
     if (!shouldAutoSelectRef.current) return
+    if (preventAutoSelect) {
+      shouldAutoSelectRef.current = false
+      return
+    }
+    if (!agent_id) {
+      shouldAutoSelectRef.current = false
+      return
+    }
     if (Object.keys(history).length > 0) {
       // Find the most recent item across all threads
       let mostRecentItem: HistoryItem | null = null
@@ -176,7 +217,7 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
 
       Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
         if (Array.isArray(items) && items.length > 0) {
-          const latestItem: HistoryItem = items[items.length - 1] // Last item is the latest
+          const latestItem: HistoryItem = items[0] // First item is the latest (newest first)
           const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date())
           if (itemDate > mostRecentDate) {
             mostRecentDate = itemDate
@@ -186,13 +227,17 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
       })
 
       // Auto-select the most recent item only for user-triggered updates
-      if (mostRecentItem && "execution_id" in mostRecentItem) {
-        setSelectedItem((mostRecentItem as HistoryItem).execution_id)
+        if (mostRecentItem && "execution_id" in mostRecentItem) {
+        const executionId = (mostRecentItem as HistoryItem).execution_id
+        setInternalSelectedItem(executionId)
+        if (!selectedExecutionId) {
+          void loadHistoryItem(executionId, agent_id)
+        }
       }
       // Reset the flag
       shouldAutoSelectRef.current = false
     }
-  }, [history])
+  }, [history, agent_id, loadHistoryItem, selectedExecutionId, preventAutoSelect])
 
   useEffect(() => {
     const updateHeight = () => {
@@ -228,9 +273,16 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
   const handleHistoryClick = (execution_id: string) => {
     if (!agent_id || !execution_id) return
 
-    setSelectedItem(execution_id)
-    onHistoryItemClick(execution_id, agent_id)
+    setInternalSelectedItem(execution_id)
+    loadHistoryItem(execution_id, agent_id)
   }
+
+  const handleCreateNew = () => {
+    setInternalSelectedItem(null)
+    onCreateNew?.()
+  }
+
+  const resolvedSelectedId = selectedExecutionId ?? internalSelectedItem ?? null
 
   const toggleThreadExpansion = (threadId: string) => {
     const newExpanded = new Set(expandedThreads)
@@ -242,18 +294,60 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
     setExpandedThreads(newExpanded)
   }
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string): string => {
     try {
-      const date = new Date(dateString)
-      return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      })
-    } catch {
-      return "Invalid date"
+      if (!dateString || dateString.trim() === "") {
+        return "Unknown date"
+      }
+
+      let date: Date
+
+      // Ensure the date string is treated as UTC
+      if (
+        dateString.endsWith("Z") ||
+        dateString.includes("+") ||
+        (dateString.includes("-") && dateString.lastIndexOf("-") > 10)
+      ) {
+        date = new Date(dateString)
+      } else if (dateString.includes("T")) {
+        date = new Date(`${dateString}Z`)
+      } else {
+        date = new Date(`${dateString} UTC`)
+      }
+
+      if (Number.isNaN(date.getTime())) {
+        return "Invalid date"
+      }
+
+      const now = new Date()
+      const diffMs = now.getTime() - date.getTime()
+      const diffMins = Math.floor(diffMs / (1000 * 60))
+      const diffHrs = Math.floor(diffMs / (1000 * 60 * 60))
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+      if (diffDays > 0) {
+        return date.toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      }
+
+      if (diffHrs > 0) {
+        const remainingMins = diffMins - diffHrs * 60
+        return `${diffHrs}h${remainingMins > 0 ? ` ${remainingMins}m` : ""} ago`
+      }
+
+      if (diffMins > 0) {
+        return `${diffMins}m ago`
+      }
+
+      return "Just now"
+    } catch (error) {
+      console.error("Error formatting date:", error, "Date string:", dateString)
+      return dateString
     }
   }
 
@@ -307,7 +401,8 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
   }
 
   return (
-    <div className="w-72 bg-transparent h-full">
+    <>
+      <div className="w-72 bg-transparent h-full">
       {/* Header */}
       <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-blue-50">
         <div className="flex items-center gap-3">
@@ -326,7 +421,7 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
         <div className="p-3 border-b border-gray-100 bg-white">
           <button
             type="button"
-            onClick={onCreateNew}
+            onClick={handleCreateNew}
             className="w-full h-10 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-md transition-colors duration-200 shadow-sm flex items-center justify-center gap-2"
           >
             <Plus className="w-4 h-4" />
@@ -384,11 +479,18 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
                     )
                   }
 
-                  const latestItem: HistoryItem = validItems[validItems.length - 1] // Last item is the latest
+                  // Sort items by date (newest first) - latest on top
+                  const sortedItems = [...validItems].sort((a, b) => {
+                    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime()
+                    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime()
+                    return dateB - dateA // Descending order (newest first)
+                  })
+                  
+                  const latestItem: HistoryItem = sortedItems[0] // First item is the latest (newest)
                   const isExpanded = expandedThreads.has(threadId)
-                  const hasMultipleVersions = validItems.length > 1
+                  const hasMultipleVersions = sortedItems.length > 1
                   const dietType = getDietType(latestItem.user_inputs)
-                  const isSelected = selectedItem === latestItem.execution_id
+                  const isSelected = resolvedSelectedId === latestItem.execution_id
                   const primaryDisplayField = getPrimaryDisplayField(latestItem.user_inputs)
                   const primaryFields = getPrimaryFields(latestItem.user_inputs)
                   const secondaryFields = getSecondaryFields(latestItem.user_inputs)
@@ -465,7 +567,7 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
                           {hasMultipleVersions && (
                             <div className="mb-2">
                               <span className="bg-blue-100 px-2 py-1 rounded text-xs text-blue-700">
-                                {validItems.length} version{validItems.length > 1 ? 's' : ''}
+                                {sortedItems.length - 1} version{sortedItems.length - 1 > 1 ? 's' : ''}
                               </span>
                             </div>
                           )}
@@ -487,11 +589,11 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
                       {/* Version Dropdown */}
                       {isExpanded && hasMultipleVersions && (
                         <div className="ml-6 space-y-2 border-l-2 border-blue-200 pl-4">
-                          {validItems.slice(0, -1).reverse().map((item: HistoryItem, index: number) => {
+                          {sortedItems.slice(1).map((item: HistoryItem, index: number) => {
                             const itemPrimaryDisplayField = getPrimaryDisplayField(item.user_inputs)
                             const itemDietType = getDietType(item.user_inputs)
-                            const itemIsSelected = selectedItem === item.execution_id
-                            const versionNumber = index + 1 // Version 1 is most recent previous, Version 2 is next, etc.
+                            const itemIsSelected = resolvedSelectedId === item.execution_id
+                            const versionNumber = index + 1 // Version 1 is second newest, Version 2 is third newest, etc.
 
                             return (
                               <div
@@ -564,7 +666,9 @@ const DietHistorySidebar: React.FC<DietHistorySidebarProps> = ({
           )}
         </div>
       </div>
-    </div>
+      </div>
+      <PopupLoader open={showHistoryLoader} label="Loading history…" />
+    </>
   )
 }
 

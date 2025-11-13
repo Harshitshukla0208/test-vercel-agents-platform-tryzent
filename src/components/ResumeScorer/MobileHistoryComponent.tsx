@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCcw, Clock, FileText, ChevronDown, Plus, Calendar, Users, DollarSign, Briefcase, Settings } from 'lucide-react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import HistorySkeletonLoader from '../Content/HistoryComponentSkeleton';
@@ -40,6 +40,7 @@ interface MobileResumeHistoryProps {
     onCreateNew?: () => void;
     className?: string;
     onItemSelect?: () => void;
+    selectedExecutionId?: string;
 }
 
 interface DisplayValue {
@@ -59,11 +60,12 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
     onCreateNew,
     className = "",
     onItemSelect,
+    selectedExecutionId,
 }) => {
     const [history, setHistory] = useState<ThreadGroup>({});
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
-    const [selectedItem, setSelectedItem] = useState<string | null>(null);
+    const [internalSelectedItem, setInternalSelectedItem] = useState<string | null>(null);
     const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
     const [maxHeight, setMaxHeight] = useState<string>('110vh');
     const sidebarRef = useRef<HTMLDivElement>(null);
@@ -126,10 +128,18 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
             const processedData: ThreadGroup = {};
             Object.entries(result.data).forEach(([threadId, items]) => {
                 if (Array.isArray(items)) {
-                    processedData[threadId] = items.map(item => ({
+                    const normalizedItems = items.map(item => ({
                         ...item,
                         user_inputs: normalizeUserInputs(item.user_inputs)
                     }));
+
+                    processedData[threadId] = normalizedItems.sort((a, b) => {
+                        const getTimestamp = (entry: HistoryItem) => {
+                            const timestamp = entry.updatedAt || entry.createdAt;
+                            return timestamp ? new Date(timestamp).getTime() : 0;
+                        };
+                        return getTimestamp(a) - getTimestamp(b);
+                    });
                 }
             });
 
@@ -179,7 +189,7 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
 
             // Auto-select the most recent item only for user-triggered updates
             if (mostRecentItem && 'execution_id' in mostRecentItem) {
-                setSelectedItem((mostRecentItem as any).execution_id);
+                setInternalSelectedItem((mostRecentItem as any).execution_id);
             }
             // Reset the flag
             shouldAutoSelectRef.current = false;
@@ -218,10 +228,21 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
         };
     }, [containerRef]);
 
+    useEffect(() => {
+        if (selectedExecutionId === undefined) return;
+        if (selectedExecutionId === "") {
+            setInternalSelectedItem(null);
+            return;
+        }
+        setInternalSelectedItem(selectedExecutionId);
+    }, [selectedExecutionId]);
+
+    const resolvedSelectedId = selectedExecutionId ?? internalSelectedItem ?? null;
+
     const handleHistoryClick = (execution_id: string) => {
         if (!agent_id || !execution_id) return;
 
-        setSelectedItem(execution_id);
+        setInternalSelectedItem(execution_id);
         onHistoryItemClick(execution_id, agent_id);
         if (onItemSelect) {
             onItemSelect();
@@ -238,31 +259,82 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
         setExpandedThreads(newExpanded);
     };
 
-    const formatDate = (dateString: string) => {
+    const parseUTCDate = (dateString: string): Date | null => {
+        if (!dateString || dateString.trim() === '') {
+            return null;
+        }
+
         try {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('en-US', {
-                month: 'numeric',
-                day: 'numeric',
-                year: 'numeric'
-            });
-        } catch {
-            return dateString;
+            const trimmed = dateString.trim();
+            const hasTimezone = /(Z|[+-]\d{2}:?\d{2})$/.test(trimmed);
+            let parsed: Date;
+
+            if (hasTimezone) {
+                parsed = new Date(trimmed);
+            } else if (trimmed.includes('T')) {
+                parsed = new Date(`${trimmed}Z`);
+            } else {
+                parsed = new Date(`${trimmed} UTC`);
+            }
+
+            return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+            console.error('Error parsing date:', error, dateString);
+            return null;
         }
     };
 
+    const formatDate = (dateString: string) => {
+        const date = parseUTCDate(dateString);
+        if (!date) {
+            return 'Unknown date';
+        }
+
+        const now = new Date();
+        let diffMs = now.getTime() - date.getTime();
+        if (diffMs < 0) diffMs = 0;
+
+        const diffMinutes = Math.floor(diffMs / (1000 * 60));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffDays > 0) {
+            return new Intl.DateTimeFormat('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(date);
+        }
+
+        if (diffHours > 0) {
+            const remainingMinutes = diffMinutes - diffHours * 60;
+            return `${diffHours}h ${remainingMinutes}m ago`;
+        }
+
+        if (diffMinutes > 0) {
+            return `${diffMinutes}m ago`;
+        }
+
+        return 'Just now';
+    };
+
     const formatTime = (dateString: string) => {
+        const date = parseUTCDate(dateString);
+        if (!date) {
+            return 'Unknown time';
+        }
+
         try {
-            if (!dateString || dateString.trim() === '') {
-                return 'Unknown time';
-            }
-            const date = new Date(dateString);
-            return date.toLocaleTimeString('en-US', {
-                hour: 'numeric',
+            return new Intl.DateTimeFormat('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
                 minute: '2-digit',
                 hour12: true
-            });
-        } catch {
+            }).format(date);
+        } catch (error) {
+            console.error('Error formatting time:', error, dateString);
             return 'Invalid time';
         }
     };
@@ -345,6 +417,18 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
         );
     };
 
+    const sortedThreadEntries = useMemo<[string, HistoryItem[]][]>(() => {
+        return Object.entries(history).sort(([, itemsA], [, itemsB]) => {
+            const getLatestTimestamp = (items: HistoryItem[]) => {
+                if (!Array.isArray(items) || items.length === 0) return 0;
+                const latestItem = items[items.length - 1];
+                const timestamp = latestItem?.updatedAt || latestItem?.createdAt;
+                return timestamp ? new Date(timestamp).getTime() : 0;
+            };
+            return getLatestTimestamp(itemsB) - getLatestTimestamp(itemsA);
+        });
+    }, [history]);
+
     return (
         <div
             ref={sidebarRef}
@@ -408,7 +492,7 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
                                 <div className="text-gray-400 text-xs mt-1">Score your first resume to get started</div>
                             </div>
                         ) : (
-                            Object.entries(history).map(([threadId, items]) => {
+                            sortedThreadEntries.map(([threadId, items]) => {
                                 if (!Array.isArray(items) || items.length === 0) return null;
                                 
                                 const latestItem = items[items.length - 1]; // Last item is the latest
@@ -416,7 +500,7 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
                                 const hasMultipleVersions = items.length > 1;
                                 const jobRole = getJobRole(latestItem.user_inputs);
                                 const details = getResumeDetails(latestItem.user_inputs, latestItem.filename);
-                                const isSelected = selectedItem === latestItem.execution_id;
+                                const isSelected = resolvedSelectedId === latestItem.execution_id;
                                 const primaryDisplayField = getPrimaryDisplayField(latestItem.user_inputs);
                                 const primaryFields = getPrimaryFields(latestItem.user_inputs);
                                 const secondaryFields = getSecondaryFields(latestItem.user_inputs);
@@ -531,7 +615,7 @@ const MobileResumeHistory: React.FC<MobileResumeHistoryProps> = ({
                                                 {items.slice(0, -1).reverse().map((item, index) => {
                                                     const itemJobRole = getJobRole(item.user_inputs);
                                                     const itemDetails = getResumeDetails(item.user_inputs, item.filename);
-                                                    const itemIsSelected = selectedItem === item.execution_id;
+                                                    const itemIsSelected = resolvedSelectedId === item.execution_id;
                                                     const versionNumber = index + 1; // Version 1 is most recent previous, Version 2 is next, etc.
 
                                                     return (

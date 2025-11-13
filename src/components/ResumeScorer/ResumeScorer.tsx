@@ -461,6 +461,7 @@ export default function ResumeScorerScreen() {
                                 onHistoryItemClick={handleHistoryItemClick}
                                 refreshTrigger={refreshTrigger}
                                 onItemSelect={handleMobileHistoryItemSelect}
+                                selectedExecutionId={currentExecutionToken}
                             />
                         </div>
                     </div>
@@ -547,6 +548,7 @@ export default function ResumeScorerScreen() {
                                     containerRef={formattedResponseRef}
                                     refreshTrigger={refreshTrigger}
                                     onCreateNew={() => formRef.current?.createNew?.()}
+                                    selectedExecutionId={currentExecutionToken}
                                 />
                             </div>
                         </div>

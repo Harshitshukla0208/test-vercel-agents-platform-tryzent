@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { RefreshCcw, Clock, FileAudio, Star, ChevronDown, Plus } from 'lucide-react';
+import { Calendar1, Clock, FileAudio, ChevronDown, Plus } from 'lucide-react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import HistorySkeletonLoader from '../Content/HistoryComponentSkeleton';
+import PopupLoader from '@/components/PopupLoader';
 
 interface VariableInput {
     variable: string;
@@ -38,6 +39,7 @@ interface HistorySidebarProps {
     containerRef?: React.RefObject<HTMLDivElement | null>;
     refreshTrigger?: number;
     onCreateNew?: () => void;
+    currentExecutionId?: string; // Add this prop to track what's currently displayed
 }
 
 const AudioHistory: React.FC<HistorySidebarProps> = ({
@@ -45,6 +47,7 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
     containerRef,
     refreshTrigger,
     onCreateNew,
+    currentExecutionId, // Accept current execution ID from parent
 }) => {
     const [history, setHistory] = useState<ThreadGroup>({});
     const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -53,7 +56,8 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
     const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
     const [maxHeight, setMaxHeight] = useState<string>('110vh');
     const sidebarRef = useRef<HTMLDivElement>(null);
-    const shouldAutoSelectRef = useRef<boolean>(false);
+    const lastRefreshTriggerRef = useRef<number | undefined>(undefined);
+    const [showHistoryLoader, setShowHistoryLoader] = useState(false);
 
     // Safe navigation hooks usage
     const searchParams = useSearchParams();
@@ -71,13 +75,12 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
         if (!Array.isArray(userInputs)) return [];
 
         return userInputs.filter(input => {
-            // Filter out entries that don't have the expected structure
             return input &&
                 typeof input.variable === 'string' &&
                 typeof input.variable_value === 'string' &&
-                input.variable !== 'agent_id' && // Exclude agent_id entries
-                input.variable !== 'Agent_inputs' && // Exclude Agent_inputs entries
-                input.variable !== 'structured_output'; // Exclude structured_output entries
+                input.variable !== 'agent_id' &&
+                input.variable !== 'Agent_inputs' &&
+                input.variable !== 'structured_output';
         });
     };
 
@@ -135,54 +138,40 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
         }
     }, [agent_id]);
 
-    // Refresh trigger effect
+    // Handle refresh trigger - fetch new data when triggered
     useEffect(() => {
-        if (refreshTrigger && agent_id) {
-            // Mark that this fetch is user-triggered (new version/modification)
-            shouldAutoSelectRef.current = true;
+        if (refreshTrigger && refreshTrigger !== lastRefreshTriggerRef.current && agent_id) {
+            lastRefreshTriggerRef.current = refreshTrigger;
             fetchHistory();
         }
     }, [refreshTrigger, agent_id]);
 
-    // Auto-select latest item only when user triggered (refreshTrigger)
+    // Sync selected item with currentExecutionId prop
     useEffect(() => {
-        if (!shouldAutoSelectRef.current) return;
-        if (Object.keys(history).length > 0) {
-            // Find the most recent item across all threads
-            let mostRecentItem: HistoryItem | null = null;
-            let mostRecentDate = new Date(0);
+        if (currentExecutionId) {
+            setSelectedItem(currentExecutionId);
 
-            Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
-                if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1]; // Last item is the latest
-                    const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date());
-                    if (itemDate > mostRecentDate) {
-                        mostRecentDate = itemDate;
-                        mostRecentItem = latestItem;
-                    }
+            // Auto-expand the thread containing the current execution
+            Object.entries(history).forEach(([threadId, items]) => {
+                const hasCurrentExecution = items.some(item => item.execution_id === currentExecutionId);
+                if (hasCurrentExecution) {
+                    setExpandedThreads(prev => new Set([...prev, threadId]));
                 }
             });
-
-            // Auto-select the most recent item only for user-triggered updates
-            if (mostRecentItem && 'execution_id' in mostRecentItem) {
-                setSelectedItem((mostRecentItem as any).execution_id);
-            }
-            // Reset the flag
-            shouldAutoSelectRef.current = false;
+        } else {
+            // Clear selection when currentExecutionId is empty (e.g., when createNew is clicked)
+            setSelectedItem(null);
         }
-    }, [history]);
+    }, [currentExecutionId, history]);
 
-    // Height calculation effect with 80vh addition
+    // Height calculation effect
     useEffect(() => {
         const updateHeight = () => {
             if (containerRef?.current) {
                 const containerHeight = containerRef.current.offsetHeight;
                 if (containerHeight > 0) {
-                    // Calculate 80vh in pixels
                     const viewportHeight = window.innerHeight;
-                    const additionalHeight = viewportHeight * 0.69; // 80vh
-                    
-                    // Add the container height + 330px + 80vh
+                    const additionalHeight = viewportHeight * 0.69;
                     const totalHeight = containerHeight + 330 + additionalHeight;
                     setMaxHeight(`${totalHeight}px`);
                 }
@@ -210,11 +199,22 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
         };
     }, [containerRef]);
 
+    const loadHistoryItem = (execution_id: string, agentId: string) => {
+        if (!agentId || !execution_id) return;
+
+        setShowHistoryLoader(true);
+        Promise.resolve(onHistoryItemClick(execution_id, agentId))
+            .catch(error => {
+                console.error('Error loading history item:', error);
+            })
+            .finally(() => setShowHistoryLoader(false));
+    };
+
     const handleHistoryClick = (execution_id: string) => {
         if (!agent_id || !execution_id) return;
 
         setSelectedItem(execution_id);
-        onHistoryItemClick(execution_id, agent_id);
+        loadHistoryItem(execution_id, agent_id);
     };
 
     const toggleThreadExpansion = (threadId: string) => {
@@ -227,25 +227,68 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
         setExpandedThreads(newExpanded);
     };
 
-    const formatDate = (dateString: string) => {
+    const formatDate = (dateString: string): string => {
         try {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('en-US', {
-                month: 'numeric',
+            if (!dateString || dateString.trim() === '') {
+                return 'Unknown date';
+            }
+
+            let parsedDate: Date;
+
+            if (
+                dateString.endsWith('Z') ||
+                dateString.includes('+') ||
+                (dateString.includes('-') && dateString.lastIndexOf('-') > 10)
+            ) {
+                parsedDate = new Date(dateString);
+            } else if (dateString.includes('T')) {
+                parsedDate = new Date(dateString + 'Z');
+            } else {
+                parsedDate = new Date(`${dateString} UTC`);
+            }
+
+            if (Number.isNaN(parsedDate.getTime())) {
+                return dateString;
+            }
+
+            const now = new Date();
+            const diffMs = now.getTime() - parsedDate.getTime();
+            const diffMins = Math.floor(diffMs / (1000 * 60));
+            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+            if (diffMs >= 0 && diffMins < 1) {
+                return 'Just now';
+            }
+
+            if (diffMs >= 0 && diffHrs < 1) {
+                return `${diffMins}m ago`;
+            }
+
+            if (diffMs >= 0 && diffDays < 1) {
+                const remainingMins = diffMins % 60;
+                return `${diffHrs}h${remainingMins ? ` ${remainingMins}m` : ''} ago`;
+            }
+
+            return parsedDate.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                month: 'short',
                 day: 'numeric',
-                year: 'numeric'
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
             });
-        } catch {
+        } catch (error) {
+            console.error('Error formatting date:', error, 'Date string:', dateString);
             return dateString;
         }
     };
 
     const getFileName = (item: HistoryItem) => {
-        // Use the filename field if available, otherwise fall back to searching user inputs
         if ('filename' in item && item.filename) {
             return item.filename;
         }
-        
+
         const fileInput = item.user_inputs.find(input =>
             input.variable.toLowerCase().includes('file') ||
             input.variable.toLowerCase().includes('audio') ||
@@ -257,7 +300,6 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
     const getEnabledFeatures = (userInputs: VariableInput[]) => {
         const features = [];
 
-        // Check for different analysis types based on user inputs
         const hasKeywords = userInputs.some(input =>
             input.variable.toLowerCase().includes('keyword') &&
             input.variable_value.toLowerCase() !== 'false'
@@ -310,33 +352,17 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
         return features;
     };
 
-    const getThreadSummary = (userInputs: VariableInput[]) => {
-        const summary: string[] = [];
-        
-        // Add key fields to summary
-        const keyFields = ['filename', 'audio_type', 'analysis_type', 'language'];
-        keyFields.forEach(field => {
-            const input = userInputs.find(input => 
-                input.variable.toLowerCase().includes(field)
-            );
-            if (input && input.variable_value) {
-                summary.push(`${input.variable.replace(/_/g, ' ')}: ${input.variable_value}`);
-            }
-        });
-
-        return summary.slice(0, 2).join(' • ');
-    };
-
     return (
-        <div
-            ref={sidebarRef}
-            className="w-72 bg-white border-l rounded-md border-gray-200 shadow-sm"
-            style={{
-                height: maxHeight,
-                minHeight: '400px',
-                overflow: 'hidden'
-            }}
-        >
+        <>
+            <div
+                ref={sidebarRef}
+                className="w-72 bg-white border-l rounded-md border-gray-200 shadow-sm"
+                style={{
+                    height: maxHeight,
+                    minHeight: '400px',
+                    overflow: 'hidden'
+                }}
+            >
             {/* Header */}
             <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-violet-50 to-purple-50">
                 <div className="flex items-center gap-3">
@@ -390,15 +416,36 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                 <div className="text-gray-400 text-xs mt-1">Upload an audio file to start analyzing</div>
                             </div>
                         ) : (
-                            Object.entries(history).map(([threadId, items]) => {
-                                if (!Array.isArray(items) || items.length === 0) return null;
-                                
-                                const latestItem = items[items.length - 1]; // Last item is the latest
-                                const isExpanded = expandedThreads.has(threadId);
-                                const hasMultipleVersions = items.length > 1;
-                                const fileName = getFileName(latestItem);
-                                const enabledFeatures = getEnabledFeatures(latestItem.user_inputs);
-                                const isSelected = selectedItem === latestItem.execution_id;
+                            // Sort threads by their latest item's date (newest first)
+                            Object.entries(history)
+                                .map(([threadId, items]) => {
+                                    if (!Array.isArray(items) || items.length === 0) return null;
+
+                                    // Sort items within thread by date (oldest to newest)
+                                    const sortedItems = [...items].sort((a, b) => {
+                                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                                        return dateA - dateB; // Oldest first, newest last
+                                    });
+
+                                    const latestItem = sortedItems[sortedItems.length - 1];
+                                    const latestDate = new Date(latestItem.updatedAt || latestItem.createdAt || 0).getTime();
+
+                                    return {
+                                        threadId,
+                                        sortedItems,
+                                        latestItem,
+                                        latestDate
+                                    };
+                                })
+                                .filter((item): item is NonNullable<typeof item> => item !== null)
+                                .sort((a, b) => b.latestDate - a.latestDate) // Sort threads: newest first
+                                .map(({ threadId, sortedItems, latestItem }) => {
+                                    const isExpanded = expandedThreads.has(threadId);
+                                    const hasMultipleVersions = sortedItems.length > 1;
+                                    const fileName = getFileName(latestItem);
+                                    const enabledFeatures = getEnabledFeatures(latestItem.user_inputs);
+                                    const isSelected = latestItem.execution_id === currentExecutionId;
 
                                 return (
                                     <div key={threadId} className="space-y-2">
@@ -408,7 +455,7 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                                 isSelected
                                                     ? 'border-[#7c3aed] bg-violet-50 shadow-lg'
                                                     : 'border-gray-100 hover:border-gray-200'
-                                            }`}
+                                            } ${isSelected ? 'after:absolute after:left-0 after:top-0 after:bottom-0 after:w-2 after:bg-[#7c3aed] after:rounded-l-xl after:content-[]' : ''}`}
                                             onClick={() => handleHistoryClick(latestItem.execution_id)}
                                         >
                                             {/* File Header */}
@@ -421,10 +468,10 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                                         <div className="font-medium text-gray-900 text-sm truncate">
                                                             {fileName}
                                                         </div>
-                                                        <div className="flex items-center gap-2 mt-1">
-                                                            <Clock className="w-3 h-3 text-gray-400" />
+                                                        <div className="flex items-center gap-1.5 mt-1">
+                                                            <Calendar1 className="w-3 h-3 text-gray-400" />
                                                             <span className="text-xs text-gray-500">
-                                                                Latest: {formatDate(latestItem.updatedAt || latestItem.createdAt || '')}
+                                                                {formatDate(latestItem.updatedAt || latestItem.createdAt || '')}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -437,10 +484,9 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                                         }}
                                                         className="p-1 hover:bg-violet-100 rounded transition-colors"
                                                     >
-                                                        <ChevronDown 
-                                                            className={`w-4 h-4 text-violet-600 transition-transform ${
-                                                                isExpanded ? 'rotate-180' : ''
-                                                            }`} 
+                                                        <ChevronDown
+                                                            className={`w-4 h-4 text-violet-600 transition-transform ${isExpanded ? 'rotate-180' : ''
+                                                                }`}
                                                         />
                                                     </button>
                                                 )}
@@ -456,7 +502,7 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                                                 className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${isSelected
                                                                     ? 'bg-violet-100 text-[#7c3aed]'
                                                                     : 'bg-gray-100 text-gray-600'
-                                                                }`}
+                                                                    }`}
                                                             >
                                                                 {feature}
                                                             </span>
@@ -465,7 +511,7 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                                             <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${isSelected
                                                                 ? 'bg-violet-100 text-[#7c3aed]'
                                                                 : 'bg-gray-100 text-gray-600'
-                                                            }`}>
+                                                                }`}>
                                                                 +{enabledFeatures.length - 3}
                                                             </span>
                                                         )}
@@ -477,7 +523,7 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                             {hasMultipleVersions && (
                                                 <div className="px-4 pb-3">
                                                     <span className="bg-violet-100 px-2 py-1 rounded text-xs text-violet-700">
-                                                        {items.length} version{items.length > 1 ? 's' : ''}
+                                                        {sortedItems.length} version{sortedItems.length > 1 ? 's' : ''}
                                                     </span>
                                                 </div>
                                             )}
@@ -486,24 +532,24 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                             <div className={`absolute inset-0 rounded-xl transition-opacity duration-200 pointer-events-none ${isSelected
                                                 ? 'bg-[#7c3aed]/5'
                                                 : 'bg-purple-500/0 group-hover:bg-purple-500/5'
-                                            }`} />
+                                                }`} />
                                         </div>
 
                                         {/* Version Dropdown */}
                                         {isExpanded && hasMultipleVersions && (
                                             <div className="ml-4 space-y-2 border-l-2 border-violet-200 pl-3">
-                                                {items.slice(0, -1).reverse().map((item, index) => {
+                                                {sortedItems.slice(0, -1).reverse().map((item, index) => {
                                                     const itemFileName = getFileName(item);
                                                     const itemEnabledFeatures = getEnabledFeatures(item.user_inputs);
-                                                    const itemIsSelected = selectedItem === item.execution_id;
-                                                    const versionNumber = index + 1; // Version 1 is most recent previous, Version 2 is next, etc.
+                                                    const itemIsSelected = item.execution_id === currentExecutionId;
+                                                    const versionNumber = index + 1;
 
                                                     return (
                                                         <div
                                                             key={item.execution_id}
                                                             className={`group relative bg-white rounded-lg border-2 cursor-pointer transition-all duration-200 hover:shadow-md ${
                                                                 itemIsSelected
-                                                                    ? 'border-violet-300 bg-violet-25 shadow-md'
+                                                                    ? 'border-[#7c3aed] bg-violet-50 shadow-xl'
                                                                     : 'border-gray-100 hover:border-gray-200'
                                                             }`}
                                                             onClick={() => handleHistoryClick(item.execution_id)}
@@ -525,7 +571,7 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                                                                         {formatDate(item.updatedAt || item.createdAt || '')}
                                                                     </div>
                                                                 </div>
-                                                                
+
                                                                 {itemEnabledFeatures.length > 0 && (
                                                                     <div className="flex flex-wrap gap-1">
                                                                         {itemEnabledFeatures.slice(0, 2).map((feature, idx) => (
@@ -556,7 +602,9 @@ const AudioHistory: React.FC<HistorySidebarProps> = ({
                     </div>
                 )}
             </div>
-        </div>
+            </div>
+            <PopupLoader open={showHistoryLoader} label="Loading history…" />
+        </>
     );
 };
 

@@ -40,6 +40,8 @@ interface MobileDietHistoryProps {
     onCreateNew?: () => void;
     className?: string;
     onItemSelect?: () => void;
+    selectedExecutionId?: string;
+    preventAutoSelect?: boolean;
 }
 
 const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
@@ -49,11 +51,13 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
     onCreateNew,
     className = "",
     onItemSelect,
+    selectedExecutionId,
+    preventAutoSelect = false,
 }) => {
     const [history, setHistory] = useState<ThreadGroup>({});
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
-    const [selectedItem, setSelectedItem] = useState<string | null>(null);
+    const [internalSelectedItem, setInternalSelectedItem] = useState<string | null>(null);
     const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
     const [maxHeight, setMaxHeight] = useState<string>('110vh');
     const sidebarRef = useRef<HTMLDivElement>(null);
@@ -139,6 +143,13 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
                         ...item
                     })) as HistoryItem[];
                     
+                    // Sort items by date (newest first) - latest on top
+                    processedItems.sort((a, b) => {
+                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                        return dateB - dateA; // Descending order (newest first)
+                    });
+                    
                     processedData[threadId] = processedItems;
                     console.log(`Thread ${threadId} processed:`, processedItems.length, "items");
                 }
@@ -169,16 +180,33 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
         }
     }, [refreshTrigger, agent_id]);
 
+    useEffect(() => {
+        if (selectedExecutionId === undefined) return;
+        if (selectedExecutionId === "") {
+            setInternalSelectedItem(null);
+            return;
+        }
+        setInternalSelectedItem(selectedExecutionId);
+    }, [selectedExecutionId]);
+
     // Auto-select latest item only when user triggered
     useEffect(() => {
         if (!shouldAutoSelectRef.current) return;
+        if (preventAutoSelect) {
+            shouldAutoSelectRef.current = false;
+            return;
+        }
+        if (!agent_id) {
+            shouldAutoSelectRef.current = false;
+            return;
+        }
         if (Object.keys(history).length > 0) {
             let mostRecentItem: HistoryItem | null = null;
             let mostRecentDate = new Date(0);
 
             Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
                 if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1];
+                    const latestItem = items[0]; // First item is the latest (newest first)
                     const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date());
                     if (itemDate > mostRecentDate) {
                         mostRecentDate = itemDate;
@@ -188,11 +216,15 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
             });
 
             if (mostRecentItem && 'execution_id' in mostRecentItem) {
-                setSelectedItem((mostRecentItem as any).execution_id);
+                const executionId = (mostRecentItem as any).execution_id;
+                setInternalSelectedItem(executionId);
+                if (!selectedExecutionId) {
+                    Promise.resolve(onHistoryItemClick(executionId, agent_id)).catch(() => { });
+                }
             }
             shouldAutoSelectRef.current = false;
         }
-    }, [history]);
+    }, [history, agent_id, onHistoryItemClick, selectedExecutionId, preventAutoSelect]);
 
     // Height calculation effect
     useEffect(() => {
@@ -228,9 +260,17 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
     const handleHistoryClick = (execution_id: string) => {
         if (!agent_id || !execution_id) return;
 
-        setSelectedItem(execution_id);
+        setInternalSelectedItem(execution_id);
         onHistoryItemClick(execution_id, agent_id);
+        onItemSelect?.();
     };
+
+    const handleCreateNew = () => {
+        setInternalSelectedItem(null);
+        onCreateNew?.();
+    };
+
+    const resolvedSelectedId = selectedExecutionId ?? internalSelectedItem ?? null;
 
     const toggleThreadExpansion = (threadId: string) => {
         const newExpanded = new Set(expandedThreads);
@@ -242,11 +282,59 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
         setExpandedThreads(newExpanded);
     };
 
-    const formatDate = (dateString: string) => {
+    const formatDate = (dateString: string): string => {
         try {
-            return new Date(dateString).toLocaleString();
-        } catch {
-            return "Invalid date";
+            if (!dateString || dateString.trim() === "") {
+                return "Unknown date";
+            }
+
+            let date: Date;
+
+            if (
+                dateString.endsWith("Z") ||
+                dateString.includes("+") ||
+                (dateString.includes("-") && dateString.lastIndexOf("-") > 10)
+            ) {
+                date = new Date(dateString);
+            } else if (dateString.includes("T")) {
+                date = new Date(`${dateString}Z`);
+            } else {
+                date = new Date(`${dateString} UTC`);
+            }
+
+            if (Number.isNaN(date.getTime())) {
+                return "Invalid date";
+            }
+
+            const now = new Date();
+            const diffMs = now.getTime() - date.getTime();
+            const diffMins = Math.floor(diffMs / (1000 * 60));
+            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+            if (diffDays > 0) {
+                return date.toLocaleString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                });
+            }
+
+            if (diffHrs > 0) {
+                const remainingMins = diffMins - diffHrs * 60;
+                return `${diffHrs}h${remainingMins > 0 ? ` ${remainingMins}m` : ""} ago`;
+            }
+
+            if (diffMins > 0) {
+                return `${diffMins}m ago`;
+            }
+
+            return "Just now";
+        } catch (error) {
+            console.error("Error formatting date:", error, "Date string:", dateString);
+            return dateString;
         }
     };
 
@@ -323,7 +411,7 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
                 <div className="p-3 border-b border-gray-100 bg-white">
                     <button
                         type="button"
-                        onClick={onCreateNew}
+                        onClick={handleCreateNew}
                         className="w-full h-10 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-md transition-colors duration-200 shadow-sm flex items-center justify-center gap-2"
                     >
                         <Plus className="w-4 h-4" />
@@ -376,11 +464,18 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
                                     );
                                 }
 
-                                const latestItem: HistoryItem = validItems[validItems.length - 1];
+                                // Sort items by date (newest first) - latest on top
+                                const sortedItems = [...validItems].sort((a, b) => {
+                                    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                                    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                                    return dateB - dateA; // Descending order (newest first)
+                                });
+                                
+                                const latestItem: HistoryItem = sortedItems[0]; // First item is the latest (newest)
                                 const isExpanded = expandedThreads.has(threadId);
-                                const hasMultipleVersions = validItems.length > 1;
+                                const hasMultipleVersions = sortedItems.length > 1;
                                 const dietType = getDietType(latestItem.user_inputs);
-                                const isSelected = selectedItem === latestItem.execution_id;
+                                const isSelected = resolvedSelectedId === latestItem.execution_id;
                                 const primaryDisplayField = getPrimaryDisplayField(latestItem.user_inputs);
                                 const primaryFields = getPrimaryFields(latestItem.user_inputs);
                                 const secondaryFields = getSecondaryFields(latestItem.user_inputs);
@@ -475,7 +570,7 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
                                             {hasMultipleVersions && (
                                                 <div className="px-4 pb-3">
                                                     <span className="bg-blue-100 px-2 py-1 rounded text-xs text-blue-700">
-                                                        {validItems.length} version{validItems.length > 1 ? 's' : ''}
+                                                        {sortedItems.length - 1} version{sortedItems.length - 1 > 1 ? 's' : ''}
                                                     </span>
                                                 </div>
                                             )}
@@ -490,11 +585,11 @@ const MobileDietHistory: React.FC<MobileDietHistoryProps> = ({
                                         {/* Version Dropdown */}
                                         {isExpanded && hasMultipleVersions && (
                                             <div className="ml-4 space-y-2 border-l-2 border-blue-200 pl-3">
-                                                {validItems.slice(0, -1).reverse().map((item: HistoryItem, index: number) => {
+                                                {sortedItems.slice(1).map((item: HistoryItem, index: number) => {
                                                     const itemPrimaryDisplayValue = getPrimaryDisplayField(item.user_inputs);
                                                     const itemThreadSummary = getThreadSummary(item.user_inputs);
-                                                    const itemIsSelected = selectedItem === item.execution_id;
-                                                    const versionNumber = index + 1; // Version 1 is most recent previous, Version 2 is next, etc.
+                                                    const itemIsSelected = resolvedSelectedId === item.execution_id;
+                                                    const versionNumber = index + 1; // Version 1 is second newest, Version 2 is third newest, etc.
 
                                                     return (
                                                         <div

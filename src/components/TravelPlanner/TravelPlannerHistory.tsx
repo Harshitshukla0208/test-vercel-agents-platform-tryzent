@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { RefreshCcw, Clock, MapPin, Star, ChevronDown, Plus, Calendar, Users, DollarSign } from 'lucide-react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import HistorySkeletonLoader from '../Content/HistoryComponentSkeleton';
+import PopupLoader from '@/components/PopupLoader';
 
 interface VariableInput {
     variable: string;
@@ -38,6 +39,7 @@ interface HistorySidebarProps {
     containerRef?: React.RefObject<HTMLDivElement | null>;
     refreshTrigger?: number;
     onCreateNew?: () => void;
+    selectedExecutionId?: string;
 }
 
 interface DisplayValue {
@@ -55,6 +57,7 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
     containerRef,
     refreshTrigger,
     onCreateNew,
+    selectedExecutionId,
 }) => {
     const [history, setHistory] = useState<ThreadGroup>({});
     const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -64,6 +67,7 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
     const [maxHeight, setMaxHeight] = useState<string>('110vh');
     const sidebarRef = useRef<HTMLDivElement>(null);
     const shouldAutoSelectRef = useRef<boolean>(false);
+    const [showHistoryLoader, setShowHistoryLoader] = useState(false);
 
     // Safe navigation hooks usage
     const searchParams = useSearchParams();
@@ -154,9 +158,36 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
         }
     }, [refreshTrigger, agent_id]);
 
-    // Auto-select latest item only when user triggered (refreshTrigger)
+    // Sync selectedExecutionId from parent to internal state
+    useEffect(() => {
+        if (selectedExecutionId === undefined) return;
+        if (selectedExecutionId === "") {
+            setSelectedItem(null);
+            return;
+        }
+        setSelectedItem(selectedExecutionId);
+    }, [selectedExecutionId]);
+
+    const loadHistoryItem = useCallback((execution_id: string, agentId: string) => {
+        if (!agentId || !execution_id) return;
+
+        setShowHistoryLoader(true);
+        Promise.resolve(onHistoryItemClick(execution_id, agentId))
+            .catch(error => {
+                console.error('Error loading history item:', error);
+            })
+            .finally(() => setShowHistoryLoader(false));
+    }, [onHistoryItemClick]);
+
+    // Auto-select latest item only when user triggered (refreshTrigger) and no selectedExecutionId is provided
     useEffect(() => {
         if (!shouldAutoSelectRef.current) return;
+        if (selectedExecutionId) {
+            // If selectedExecutionId is provided, use it instead of auto-selecting
+            setSelectedItem(selectedExecutionId);
+            shouldAutoSelectRef.current = false;
+            return;
+        }
         if (Object.keys(history).length > 0) {
             // Find the most recent item across all threads
             let mostRecentItem: HistoryItem | null = null;
@@ -164,7 +195,13 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
 
             Object.entries(history).forEach(([threadId, items]) => {
                 if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1]; // Last item is the latest
+                    // Sort items by date (newest first)
+                    const sortedItems = [...items].sort((a, b) => {
+                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                        return dateB - dateA; // Descending order (newest first)
+                    });
+                    const latestItem = sortedItems[0]; // First item is the latest
                     const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date());
                     if (itemDate > mostRecentDate) {
                         mostRecentDate = itemDate;
@@ -175,12 +212,16 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
 
             // Auto-select the most recent item only for user-triggered updates
             if (mostRecentItem && 'execution_id' in mostRecentItem) {
-                setSelectedItem((mostRecentItem as any).execution_id);
+                const executionId = (mostRecentItem as any).execution_id;
+                setSelectedItem(executionId);
+                if (!selectedExecutionId) {
+                    void loadHistoryItem(executionId, agent_id);
+                }
             }
             // Reset the flag
             shouldAutoSelectRef.current = false;
         }
-    }, [history]);
+    }, [history, selectedExecutionId, agent_id, loadHistoryItem]);
 
     // Height calculation effect with 80vh addition
     useEffect(() => {
@@ -224,7 +265,7 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
         if (!agent_id || !execution_id) return;
 
         setSelectedItem(execution_id);
-        onHistoryItemClick(execution_id, agent_id);
+        loadHistoryItem(execution_id, agent_id);
     };
 
     const toggleThreadExpansion = (threadId: string) => {
@@ -423,15 +464,16 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
     };
 
     return (
-        <div
-            ref={sidebarRef}
-            className="w-72 bg-white border-l rounded-md border-gray-200 shadow-sm"
-            style={{
-                height: maxHeight,
-                minHeight: '400px',
-                overflow: 'hidden'
-            }}
-        >
+        <>
+            <div
+                ref={sidebarRef}
+                className="w-72 bg-white border-l rounded-md border-gray-200 shadow-sm"
+                style={{
+                    height: maxHeight,
+                    minHeight: '400px',
+                    overflow: 'hidden'
+                }}
+            >
             {/* Header */}
             <div className="p-4 border-b border-gray-100 bg-indigo-50">
                 <div className="flex items-center gap-3">
@@ -485,16 +527,41 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
                                 <div className="text-gray-400 text-xs mt-1">Plan your first trip to get started</div>
                             </div>
                         ) : (
-                            Object.entries(history).map(([threadId, items]) => {
-                                if (!Array.isArray(items) || items.length === 0) return null;
+                            // Sort threads by their latest item's date (most recent first)
+                            Object.entries(history)
+                                .map(([threadId, items]) => {
+                                    if (!Array.isArray(items) || items.length === 0) return null;
 
-                                const latestItem = items[items.length - 1]; // Last item is the latest
+                                    // Sort items within thread by date (newest first)
+                                    const sortedItems = [...items].sort((a, b) => {
+                                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                                        return dateB - dateA; // Descending order (newest first)
+                                    });
+
+                                    const latestItem = sortedItems[0]; // First item is the latest
+                                    const latestDate = new Date(latestItem.updatedAt || latestItem.createdAt || 0).getTime();
+
+                                    return {
+                                        threadId,
+                                        sortedItems,
+                                        latestItem,
+                                        latestDate
+                                    };
+                                })
+                                .filter(item => item !== null)
+                                .sort((a, b) => {
+                                    // Sort threads by latest item date (most recent first)
+                                    return (b?.latestDate || 0) - (a?.latestDate || 0);
+                                })
+                                .map(({ threadId, sortedItems, latestItem }) => {
                                 const isExpanded = expandedThreads.has(threadId);
-                                const hasMultipleVersions = items.length > 1;
+                                const hasMultipleVersions = sortedItems.length > 1;
                                 const destination = getDestinationName(latestItem.user_inputs);
                                 const dates = getTravelDates(latestItem.user_inputs);
                                 const details = getTravelDetails(latestItem.user_inputs);
-                                const isSelected = selectedItem === latestItem.execution_id;
+                                const resolvedSelectedId = selectedExecutionId ?? selectedItem ?? null;
+                                const isSelected = resolvedSelectedId === latestItem.execution_id;
                                 const primaryDisplayField = getPrimaryDisplayField(latestItem.user_inputs);
                                 const primaryFields = getPrimaryFields(latestItem.user_inputs);
                                 const secondaryFields = getSecondaryFields(latestItem.user_inputs);
@@ -599,7 +666,7 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
                                                 {hasMultipleVersions && (
                                                     <div className="mb-2.5">
                                                         <span className="bg-indigo-100 px-2 py-1 rounded text-xs text-indigo-700">
-                                                            {items.length} version{items.length > 1 ? 's' : ''}
+                                                            {sortedItems.length} version{sortedItems.length > 1 ? 's' : ''}
                                                         </span>
                                                     </div>
                                                 )}
@@ -621,12 +688,13 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
                                         {/* Version Dropdown */}
                                         {isExpanded && hasMultipleVersions && (
                                             <div className="ml-4 space-y-2 border-l-2 border-indigo-200 pl-3">
-                                                {items.slice(0, -1).reverse().map((item, index) => {
+                                                {sortedItems.slice(1).map((item, index) => {
                                                     const itemDestination = getDestinationName(item.user_inputs);
                                                     const itemDates = getTravelDates(item.user_inputs);
                                                     const itemDetails = getTravelDetails(item.user_inputs);
-                                                    const itemIsSelected = selectedItem === item.execution_id;
-                                                    const versionNumber = index + 1; // Version 1 is most recent previous, Version 2 is next, etc.
+                                                    const resolvedSelectedId = selectedExecutionId ?? selectedItem ?? null;
+                                                    const itemIsSelected = resolvedSelectedId === item.execution_id;
+                                                    const versionNumber = index + 1; // Version 1 is the next most recent, Version 2 is next, etc.
 
                                                     return (
                                                         <div
@@ -683,7 +751,9 @@ const TravelPlannerHistory: React.FC<HistorySidebarProps> = ({
                     </div>
                 )}
             </div>
-        </div>
+            </div>
+            <PopupLoader open={showHistoryLoader} label="Loading history…" />
+        </>
     );
 };
 

@@ -76,9 +76,31 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
     const [resumePreviews, setResumePreviews] = useState<FilePreview[]>([])
     const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0)
     const [useTextInput, setUseTextInput] = useState(true)
+    const [originalJobDescriptionFileName, setOriginalJobDescriptionFileName] = useState<string>("")
 
     // Add state for historical files
     const [historicalFiles, setHistoricalFiles] = useState<any[]>([])
+
+    const clearHistoricalFilesIfNeeded = (triggerSource?: string) => {
+        if (historicalFiles.length === 0) {
+            return
+        }
+
+        setHistoricalFiles([])
+        setOriginalJobDescriptionFileName("")
+
+        if (!jobDescriptionFile) {
+            setUseTextInput(true)
+        }
+
+        toast({
+            title: "Historical files removed",
+            description: "Please upload fresh resume and job description files before submitting any changes.",
+            duration: 3000,
+        })
+
+        console.log("Cleared historical files due to:", triggerSource || "unspecified change")
+    }
 
     const router = useRouter()
 
@@ -94,6 +116,7 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
 
     // Handle form field changes
     const handleInputChange = (variable: string, value: string | boolean | number | string[] | number[]) => {
+        clearHistoricalFilesIfNeeded(`form input change: ${variable}`)
         setFormData((prev) => ({
             ...prev,
             [variable]: value,
@@ -105,6 +128,8 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
     const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || [])
         if (files.length === 0) return
+
+        clearHistoricalFilesIfNeeded("resume upload attempt")
 
         console.log("Selected files:", files.map(f => ({ name: f.name, size: f.size, type: f.type })))
 
@@ -182,6 +207,8 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
         const file = e.target.files?.[0]
         if (!file) return
 
+        clearHistoricalFilesIfNeeded("job description upload attempt")
+
         if (file.type !== 'application/pdf') {
             toast({
                 title: "Invalid File Type",
@@ -194,6 +221,7 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
         }
 
         // Rename file to TRYZENT_JD.pdf
+        setOriginalJobDescriptionFileName(file.name);
         const renamedFile = new File([file], "TRYZENT_JD.pdf", { type: file.type })
         setJobDescriptionFile(renamedFile)
         setUseTextInput(false)
@@ -743,6 +771,7 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
                         <Button
                             type="button"
                             onClick={() => {
+                                clearHistoricalFilesIfNeeded("switch to text input")
                                 setUseTextInput(true)
                                 setJobDescriptionFile(null)
                             }}
@@ -756,6 +785,7 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
                         <Button
                             type="button"
                             onClick={() => {
+                                clearHistoricalFilesIfNeeded("switch to PDF upload")
                                 setUseTextInput(false)
                                 setFormData(prev => ({ ...prev, Job_Description: "" }))
                             }}
@@ -841,7 +871,7 @@ const DynamicResumeForm = forwardRef(({ agentData, onResponse, detailedDescripti
                                         <div className="flex items-center gap-3">
                                             <FileText className="w-8 h-8 text-indigo-600" />
                                             <div>
-                                                <p className="text-sm font-semibold text-gray-900">TRYZENT_JD.pdf</p>
+                                                <p className="text-sm font-semibold text-gray-900">{originalJobDescriptionFileName}</p>
                                                 <p className="text-xs text-gray-500">
                                                     {(jobDescriptionFile.size / 1024 / 1024).toFixed(2)} MB
                                                 </p>

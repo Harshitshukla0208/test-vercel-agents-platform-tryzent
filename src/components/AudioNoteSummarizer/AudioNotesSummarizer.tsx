@@ -613,6 +613,12 @@ export function AudioNoteSummarizer() {
                             }}
                             refreshTrigger={refreshTrigger}
                             onItemSelect={handleMobileHistoryItemSelect}
+                            onCreateNew={() => {
+                                setCurrentExecutionToken('');
+                                formRef.current?.createNew?.();
+                                handleMobileHistoryItemSelect(); // Close the mobile sidebar
+                            }}
+                            currentExecutionId={currentExecutionToken}
                         />
                     </div>
                 </div>
@@ -706,7 +712,11 @@ export function AudioNoteSummarizer() {
                                 onHistoryItemClick={handleHistoryItemClick}
                                 containerRef={formattedResponseRef}
                                 refreshTrigger={refreshTrigger}
-                                onCreateNew={() => formRef.current?.createNew?.()}
+                                onCreateNew={() => {
+                                    setCurrentExecutionToken('');
+                                    formRef.current?.createNew?.();
+                                }}
+                                currentExecutionId={currentExecutionToken}
                             />
                         </div>
 

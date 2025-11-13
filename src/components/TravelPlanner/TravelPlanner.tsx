@@ -448,6 +448,7 @@ export default function TravelPlannerScreen() {
                                 onHistoryItemClick={handleHistoryItemClick}
                                 refreshTrigger={refreshTrigger}
                                 onItemSelect={handleMobileHistoryItemSelect}
+                                selectedExecutionId={currentExecutionToken}
                             />
                         </div>
                     </div>
@@ -534,6 +535,7 @@ export default function TravelPlannerScreen() {
                                     containerRef={formattedResponseRef}
                                     refreshTrigger={refreshTrigger}
                                     onCreateNew={() => formRef.current?.createNew?.()}
+                                    selectedExecutionId={currentExecutionToken}
                                 />
                             </div>
                         </div>

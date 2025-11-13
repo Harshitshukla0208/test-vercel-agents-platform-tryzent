@@ -156,9 +156,14 @@ const MobileWorkoutHistory: React.FC<MobileWorkoutHistoryProps> = ({
             let mostRecentItem: HistoryItem | null = null;
             let mostRecentDate = new Date(0);
 
-            Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
+            Object.values(history).forEach((items: HistoryItem[]) => {
                 if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1]; // Last item is the latest
+                    const sortedItems = [...items].sort((a, b) => {
+                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                        return dateA - dateB;
+                    });
+                    const latestItem = sortedItems[sortedItems.length - 1];
                     const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date());
                     if (itemDate > mostRecentDate) {
                         mostRecentDate = itemDate;
@@ -227,14 +232,59 @@ const MobileWorkoutHistory: React.FC<MobileWorkoutHistoryProps> = ({
 
     const formatDate = (dateString: string) => {
         try {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('en-US', {
-                month: 'numeric',
-                day: 'numeric',
-                year: 'numeric'
-            });
-        } catch {
-            return dateString;
+            if (!dateString || dateString.trim() === '') {
+                return 'Unknown date';
+            }
+
+            let date: Date;
+
+            if (
+                dateString.endsWith('Z') ||
+                dateString.includes('+') ||
+                (dateString.includes('-') && dateString.lastIndexOf('-') > 10)
+            ) {
+                date = new Date(dateString);
+            } else if (dateString.includes('T')) {
+                date = new Date(`${dateString}Z`);
+            } else {
+                date = new Date(`${dateString} UTC`);
+            }
+
+            const now = new Date();
+            let diffMs = now.getTime() - date.getTime();
+
+            if (diffMs < 0) {
+                diffMs = 0;
+            }
+
+            const diffMins = Math.floor(diffMs / (1000 * 60));
+            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+            if (diffDays > 0) {
+                return date.toLocaleString('en-IN', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                    timeZone: 'Asia/Kolkata',
+                });
+            }
+
+            if (diffHrs > 0) {
+                const remainingMins = diffMins - diffHrs * 60;
+                return `${diffHrs}h${remainingMins > 0 ? ` ${remainingMins}m` : ''} ago`;
+            }
+
+            if (diffMins > 0) {
+                return `${diffMins}m ago`;
+            }
+
+            return 'Just now';
+        } catch (error) {
+            console.error('Error formatting date:', error, 'Date string:', dateString);
+            return 'Invalid date';
         }
     };
 
@@ -299,7 +349,11 @@ const MobileWorkoutHistory: React.FC<MobileWorkoutHistoryProps> = ({
                 <div className="p-3 border-b border-gray-100 bg-white">
                     <button
                         type="button"
-                        onClick={onCreateNew}
+                        onClick={() => {
+                            setSelectedItem(null);
+                            shouldAutoSelectRef.current = false;
+                            onCreateNew();
+                        }}
                         className="w-full h-10 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium rounded-md transition-colors duration-200 shadow-sm flex items-center justify-center gap-2"
                     >
                         <Plus className="w-4 h-4" />
@@ -337,9 +391,15 @@ const MobileWorkoutHistory: React.FC<MobileWorkoutHistoryProps> = ({
                             Object.entries(history).map(([threadId, items]) => {
                                 if (!Array.isArray(items) || items.length === 0) return null;
 
-                                const latestItem = items[items.length - 1]; // Last item is the latest
+                                const sortedItems = [...items].sort((a, b) => {
+                                    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                                    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                                    return dateA - dateB;
+                                });
+
+                                const latestItem = sortedItems[sortedItems.length - 1];
                                 const isExpanded = expandedThreads.has(threadId);
-                                const hasMultipleVersions = items.length > 1;
+                                const hasMultipleVersions = sortedItems.length > 1;
                                 const workoutType = getWorkoutType(latestItem.user_inputs);
                                 const subjectName = getSubjectName(latestItem.user_inputs);
                                 const isSelected = selectedItem === latestItem.execution_id;
@@ -401,7 +461,7 @@ const MobileWorkoutHistory: React.FC<MobileWorkoutHistoryProps> = ({
                                             {hasMultipleVersions && (
                                                 <div className="px-4 pb-3">
                                                     <span className="bg-indigo-100 px-2 py-1 rounded text-xs text-indigo-700">
-                                                        {items.length} version{items.length > 1 ? 's' : ''}
+                                                        {sortedItems.length} version{sortedItems.length > 1 ? 's' : ''}
                                                     </span>
                                                 </div>
                                             )}
@@ -416,7 +476,7 @@ const MobileWorkoutHistory: React.FC<MobileWorkoutHistoryProps> = ({
                                         {/* Version Dropdown */}
                                         {isExpanded && hasMultipleVersions && (
                                             <div className="ml-4 space-y-2 border-l-2 border-indigo-200 pl-3">
-                                                {items.slice(0, -1).reverse().map((item, index) => {
+                                                {sortedItems.slice(0, -1).reverse().map((item, index) => {
                                                     const itemWorkoutType = getWorkoutType(item.user_inputs);
                                                     const itemSubjectName = getSubjectName(item.user_inputs);
                                                     const itemIsSelected = selectedItem === item.execution_id;

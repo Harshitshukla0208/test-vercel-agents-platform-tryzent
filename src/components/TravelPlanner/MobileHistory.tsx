@@ -40,6 +40,7 @@ interface MobileTravelHistoryProps {
     onCreateNew?: () => void;
     className?: string;
     onItemSelect?: () => void;
+    selectedExecutionId?: string;
 }
 
 interface DisplayValue {
@@ -59,6 +60,7 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
     onCreateNew,
     className = "",
     onItemSelect,
+    selectedExecutionId,
 }) => {
     const [history, setHistory] = useState<ThreadGroup>({});
     const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -158,9 +160,25 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
         }
     }, [refreshTrigger, agent_id]);
 
-    // Auto-select latest item only when user triggered (refreshTrigger)
+    // Sync selectedExecutionId from parent to internal state
+    useEffect(() => {
+        if (selectedExecutionId === undefined) return;
+        if (selectedExecutionId === "") {
+            setSelectedItem(null);
+            return;
+        }
+        setSelectedItem(selectedExecutionId);
+    }, [selectedExecutionId]);
+
+    // Auto-select latest item only when user triggered (refreshTrigger) and no selectedExecutionId is provided
     useEffect(() => {
         if (!shouldAutoSelectRef.current) return;
+        if (selectedExecutionId) {
+            // If selectedExecutionId is provided, use it instead of auto-selecting
+            setSelectedItem(selectedExecutionId);
+            shouldAutoSelectRef.current = false;
+            return;
+        }
         if (Object.keys(history).length > 0) {
             // Find the most recent item across all threads
             let mostRecentItem: HistoryItem | null = null;
@@ -168,7 +186,13 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
 
             Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
                 if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1]; // Last item is the latest
+                    // Sort items by date (newest first)
+                    const sortedItems = [...items].sort((a, b) => {
+                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                        return dateB - dateA; // Descending order (newest first)
+                    });
+                    const latestItem = sortedItems[0]; // First item is the latest
                     const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date());
                     if (itemDate > mostRecentDate) {
                         mostRecentDate = itemDate;
@@ -184,7 +208,7 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
             // Reset the flag
             shouldAutoSelectRef.current = false;
         }
-    }, [history]);
+    }, [history, selectedExecutionId]);
 
     // Height calculation effect
     useEffect(() => {
@@ -479,16 +503,41 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
                                 <div className="text-gray-400 text-xs mt-1">Plan your first trip to get started</div>
                             </div>
                         ) : (
-                            Object.entries(history).map(([threadId, items]) => {
-                                if (!Array.isArray(items) || items.length === 0) return null;
-                                
-                                const latestItem = items[items.length - 1]; // Last item is the latest
+                            // Sort threads by their latest item's date (most recent first)
+                            Object.entries(history)
+                                .map(([threadId, items]) => {
+                                    if (!Array.isArray(items) || items.length === 0) return null;
+
+                                    // Sort items within thread by date (newest first)
+                                    const sortedItems = [...items].sort((a, b) => {
+                                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                                        return dateB - dateA; // Descending order (newest first)
+                                    });
+
+                                    const latestItem = sortedItems[0]; // First item is the latest
+                                    const latestDate = new Date(latestItem.updatedAt || latestItem.createdAt || 0).getTime();
+
+                                    return {
+                                        threadId,
+                                        sortedItems,
+                                        latestItem,
+                                        latestDate
+                                    };
+                                })
+                                .filter(item => item !== null)
+                                .sort((a, b) => {
+                                    // Sort threads by latest item date (most recent first)
+                                    return (b?.latestDate || 0) - (a?.latestDate || 0);
+                                })
+                                .map(({ threadId, sortedItems, latestItem }) => {
                                 const isExpanded = expandedThreads.has(threadId);
-                                const hasMultipleVersions = items.length > 1;
+                                const hasMultipleVersions = sortedItems.length > 1;
                                 const destination = getDestinationName(latestItem.user_inputs);
                                 const dates = getTravelDates(latestItem.user_inputs);
                                 const details = getTravelDetails(latestItem.user_inputs);
-                                const isSelected = selectedItem === latestItem.execution_id;
+                                const resolvedSelectedId = selectedExecutionId ?? selectedItem ?? null;
+                                const isSelected = resolvedSelectedId === latestItem.execution_id;
                                 const primaryDisplayField = getPrimaryDisplayField(latestItem.user_inputs);
                                 const primaryFields = getPrimaryFields(latestItem.user_inputs);
                                 const secondaryFields = getSecondaryFields(latestItem.user_inputs);
@@ -596,7 +645,7 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
                                                 {hasMultipleVersions && (
                                                     <div className="mb-2.5">
                                                         <span className="bg-indigo-100 px-2 py-1 rounded text-xs text-indigo-700">
-                                                            {items.length} version{items.length > 1 ? 's' : ''}
+                                                            {sortedItems.length} version{sortedItems.length > 1 ? 's' : ''}
                                                         </span>
                                                     </div>
                                                 )}
@@ -619,12 +668,13 @@ const MobileTravelHistory: React.FC<MobileTravelHistoryProps> = ({
                                         {/* Version Dropdown */}
                                         {isExpanded && hasMultipleVersions && (
                                             <div className="ml-4 space-y-2 border-l-2 border-indigo-200 pl-3">
-                                                {items.slice(0, -1).reverse().map((item, index) => {
+                                                {sortedItems.slice(1).map((item, index) => {
                                                     const itemDestination = getDestinationName(item.user_inputs);
                                                     const itemDates = getTravelDates(item.user_inputs);
                                                     const itemDetails = getTravelDetails(item.user_inputs);
-                                                    const itemIsSelected = selectedItem === item.execution_id;
-                                                    const versionNumber = index + 1; // Version 1 is most recent previous, Version 2 is next, etc.
+                                                    const resolvedSelectedId = selectedExecutionId ?? selectedItem ?? null;
+                                                    const itemIsSelected = resolvedSelectedId === item.execution_id;
+                                                    const versionNumber = index + 1; // Version 1 is the next most recent, Version 2 is next, etc.
 
                                                     return (
                                                         <div

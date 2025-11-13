@@ -97,6 +97,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
+        // Wait for fonts to load, especially for Hindi/Devanagari fonts
+        try {
+            await page.evaluate(async () => {
+                if ((document as any).fonts && (document as any).fonts.ready) {
+                    await (document as any).fonts.ready;
+                }
+
+                const fonts = [
+                    '12pt "Noto Sans Devanagari"',
+                    '12pt "Noto Serif Devanagari"'
+                ];
+
+                if ((document as any).fonts && (document as any).fonts.load) {
+                    await Promise.all(
+                        fonts.map(font => {
+                            try {
+                                return (document as any).fonts.load(font);
+                            } catch (e) {
+                                return Promise.resolve();
+                            }
+                        })
+                    );
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            });
+        } catch (error) {
+            console.warn('Font loading warning:', error);
+            await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+        }
+
         // Check if there's any math content and wait accordingly
         const hasMathContent = await page.evaluate(() => {
             const mathElements = document.querySelectorAll('.math-content');
@@ -224,9 +255,11 @@ function generateHTML(
         return Object.keys(options).length > 0 ? options : null;
     };
 
-    const escapeHtml = (text: string): string => {
-        if (!text) return '';
-        return text
+    const escapeHtml = (text: unknown): string => {
+        if (text === null || text === undefined) return '';
+        const value = typeof text === 'string' ? text : String(text);
+        if (!value) return '';
+        return value
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
@@ -343,7 +376,8 @@ function generateHTML(
         questions.forEach((question, index) => {
             const questionObj = Array.isArray(question) ? question[0] : question;
             const questionKey = Object.keys(questionObj)[0];
-            const questionText = questionObj[questionKey];
+            const questionTextRaw = questionObj[questionKey];
+            const questionText = typeof questionTextRaw === 'string' ? questionTextRaw : String(questionTextRaw ?? '');
             const options = questionObj.options || parseOptions(questionText);
             const cleanQuestionText = questionText.split(/Options?:/)[0].trim();
 
@@ -412,13 +446,25 @@ function generateHTML(
         return html;
     };
 
+    const safeSubject = escapeHtml(subject);
+    const safeGrade = escapeHtml(grade);
+    const safeTotalMarks = escapeHtml(totalMarks);
+    const safeDuration = escapeHtml(duration);
+    const safeSchoolName = schoolName ? escapeHtml(schoolName) : '';
+    const safeExaminationName = examinationName ? escapeHtml(examinationName) : '';
+    const hasSchoolName = Boolean(schoolName && schoolName.trim());
+    const hasExaminationName = Boolean(examinationName && examinationName.trim());
+
     return `
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Test Paper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
@@ -430,11 +476,13 @@ function generateHTML(
         }
 
         body {
-            font-family: 'Times New Roman', Times, serif;
+            font-family: 'Noto Sans Devanagari', 'Noto Serif Devanagari', 'Times New Roman', Times, serif;
             font-size: 12pt;
             line-height: 1.5;
             color: #000;
             background: white;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .page-container {
@@ -794,8 +842,8 @@ function generateHTML(
             <div class="header-content">
                 ${schoolLogoBase64 ? `<img src="${schoolLogoBase64}" alt="School Logo" class="school-logo">` : ''}
                 <div class="header-text">
-                    ${schoolName ? `<div class="school-name">${schoolName}</div>` : '<div class="test-paper-title">TEST PAPER</div>'}
-                    ${examinationName ? `<div class="examination-name">${examinationName}</div>` : ''}
+                    ${hasSchoolName ? `<div class="school-name">${safeSchoolName}</div>` : '<div class="test-paper-title">TEST PAPER</div>'}
+                    ${hasExaminationName ? `<div class="examination-name">${safeExaminationName}</div>` : ''}
                 </div>
             </div>
         </div>
@@ -804,19 +852,19 @@ function generateHTML(
             <div class="info-row">
                 <div class="info-item">
                     <span class="info-label">Class:</span>
-                    <span>${grade}</span>
+                    <span>${safeGrade}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Subject:</span>
-                    <span>${subject}</span>
+                    <span>${safeSubject}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Max Marks:</span>
-                    <span>${totalMarks}</span>
+                    <span>${safeTotalMarks}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Time:</span>
-                    <span>${duration} min</span>
+                    <span>${safeDuration ? `${safeDuration} min` : ''}</span>
                 </div>
             </div>
             <div class="info-row">

@@ -34,13 +34,15 @@ export default function TravelPlannerLoader({ isVisible = true }: TravelPlannerL
             {/* Popup container */}
             <div className="relative bg-white rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 mx-3 sm:mx-4 max-w-xs sm:max-w-sm md:max-w-md w-full animate-fade-in">
                 <div className="flex flex-col items-center text-center space-y-4 sm:space-y-6">
-                    {/* Floating Map Pin Icon */}
-                    <div className="flex items-center space-x-1">
+                    {/* Animated Audio Bars */}
+                    <div className="relative w-full flex items-end justify-center space-x-0.5 sm:space-x-1 md:space-x-1.5 h-10 sm:h-14 md:h-18 px-2">
                         {[12, 24, 16, 32, 20, 28, 14, 22, 18].map((height, index) => (
                             <motion.div
                                 key={index}
-                                className="w-1 bg-blue-500 rounded-full"
-                                style={{ height: `${height}px` }}
+                                className="w-0.5 sm:w-1 md:w-1.5 bg-blue-500 rounded-full"
+                                style={{ 
+                                    height: `${height}px`,
+                                }}
                                 animate={{
                                     scaleY: [0.5, 1, 0.5]
                                 }}

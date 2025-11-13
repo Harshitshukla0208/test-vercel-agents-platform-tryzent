@@ -446,6 +446,7 @@ export default function DietPlannerScreen() {
                 onHistoryItemClick={handleHistoryItemClick}
                 refreshTrigger={refreshTrigger}
                 onItemSelect={handleMobileHistoryItemSelect}
+                selectedExecutionId={currentExecutionToken}
               />
             </div>
           </div>
@@ -532,6 +533,7 @@ export default function DietPlannerScreen() {
                   containerRef={formattedResponseRef}
                   refreshTrigger={refreshTrigger}
                   onCreateNew={() => formRef.current?.createNew?.()}
+                  selectedExecutionId={currentExecutionToken}
                 />
               </div>
             </div>

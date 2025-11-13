@@ -5,6 +5,7 @@ import { useEffect, useState, useRef } from "react"
 import { RefreshCcw, Clock, Dumbbell, ChevronDown, Plus } from "lucide-react"
 import { usePathname, useSearchParams } from "next/navigation"
 import HistorySkeletonLoader from "@/components/Content/HistoryComponentSkeleton"
+import PopupLoader from "@/components/PopupLoader"
 
 interface VariableInput {
     variable: string
@@ -54,6 +55,7 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
     const [maxHeight, setMaxHeight] = useState<string>("920px")
     const sidebarRef = useRef<HTMLDivElement>(null)
     const shouldAutoSelectRef = useRef<boolean>(false)
+    const [showHistoryLoader, setShowHistoryLoader] = useState(false)
 
     // Safe navigation hooks usage
     const searchParams = useSearchParams()
@@ -151,9 +153,14 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
             let mostRecentItem: HistoryItem | null = null
             let mostRecentDate = new Date(0)
 
-            Object.entries(history).forEach(([threadId, items]: [string, HistoryItem[]]) => {
+            Object.values(history).forEach((items: HistoryItem[]) => {
                 if (Array.isArray(items) && items.length > 0) {
-                    const latestItem = items[items.length - 1] // Last item is the latest
+                    const sortedItems = [...items].sort((a, b) => {
+                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime()
+                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime()
+                        return dateA - dateB
+                    })
+                    const latestItem = sortedItems[sortedItems.length - 1]
                     const itemDate = new Date(latestItem.updatedAt || latestItem.createdAt || new Date())
                     if (itemDate > mostRecentDate) {
                         mostRecentDate = itemDate
@@ -202,11 +209,22 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
         }
     }, [containerRef])
 
+    const loadHistoryItem = (execution_id: string, agentId: string) => {
+        if (!agentId || !execution_id) return
+
+        setShowHistoryLoader(true)
+        Promise.resolve(onHistoryItemClick(execution_id, agentId))
+            .catch((error) => {
+                console.error("Error loading history item:", error)
+            })
+            .finally(() => setShowHistoryLoader(false))
+    }
+
     const handleHistoryClick = (execution_id: string) => {
         if (!agent_id || !execution_id) return
 
         setSelectedItem(execution_id)
-        onHistoryItemClick(execution_id, agent_id)
+        loadHistoryItem(execution_id, agent_id)
     }
 
     const toggleThreadExpansion = (threadId: string) => {
@@ -221,38 +239,58 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
 
     const formatDate = (dateString: string) => {
         try {
-            const date = new Date(dateString)
-            const today = new Date()
-            const yesterday = new Date(today)
-            yesterday.setDate(yesterday.getDate() - 1)
-
-            // Format time without seconds (only hours and minutes)
-            const timeOptions: Intl.DateTimeFormatOptions = {
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: true,
-            }
-            const time = date.toLocaleTimeString("en-US", timeOptions)
-
-            // Check if it's today
-            if (date.toDateString() === today.toDateString()) {
-                return `Today, ${time}`
+            if (!dateString || dateString.trim() === "") {
+                return "Unknown date"
             }
 
-            // Check if it's yesterday
-            if (date.toDateString() === yesterday.toDateString()) {
-                return `Yesterday, ${time}`
+            let date: Date
+
+            if (
+                dateString.endsWith("Z") ||
+                dateString.includes("+") ||
+                (dateString.includes("-") && dateString.lastIndexOf("-") > 10)
+            ) {
+                date = new Date(dateString)
+            } else if (dateString.includes("T")) {
+                date = new Date(`${dateString}Z`)
+            } else {
+                date = new Date(`${dateString} UTC`)
             }
 
-            // For other dates, show the date with time
-            const dateOptions: Intl.DateTimeFormatOptions = {
-                month: "short",
-                day: "numeric",
-                year: date.getFullYear() !== today.getFullYear() ? "numeric" : undefined,
+            const now = new Date()
+            let diffMs = now.getTime() - date.getTime()
+
+            if (diffMs < 0) {
+                diffMs = 0
             }
-            const dateStr = date.toLocaleDateString("en-US", dateOptions)
-            return `${dateStr}, ${time}`
-        } catch {
+
+            const diffMins = Math.floor(diffMs / (1000 * 60))
+            const diffHrs = Math.floor(diffMs / (1000 * 60 * 60))
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+            if (diffDays > 0) {
+                return date.toLocaleString("en-IN", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                    timeZone: "Asia/Kolkata",
+                })
+            }
+
+            if (diffHrs > 0) {
+                const remainingMins = diffMins - diffHrs * 60
+                return `${diffHrs}h${remainingMins > 0 ? ` ${remainingMins}m` : ""} ago`
+            }
+
+            if (diffMins > 0) {
+                return `${diffMins}m ago`
+            }
+
+            return "Just now"
+        } catch (error) {
+            console.error("Error formatting date:", error, "Date string:", dateString)
             return "Invalid date"
         }
     }
@@ -302,7 +340,8 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
     }
 
     return (
-        <div className="w-72 bg-transparent h-full" ref={sidebarRef}>
+        <>
+            <div className="w-72 bg-transparent h-full" ref={sidebarRef}>
             {/* Header */}
             <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-indigo-50">
                 <div className="flex items-center gap-3">
@@ -321,7 +360,11 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
                 <div className="p-3 border-b border-gray-100 bg-white">
                     <button
                         type="button"
-                        onClick={onCreateNew}
+                        onClick={() => {
+                            setSelectedItem(null)
+                            shouldAutoSelectRef.current = false
+                            onCreateNew()
+                        }}
                         className="w-full h-10 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium rounded-md transition-colors duration-200 shadow-sm flex items-center justify-center gap-2"
                     >
                         <Plus className="w-4 h-4" />
@@ -358,10 +401,15 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
                             ) : (
                                 Object.entries(history).map(([threadId, items]) => {
                                     if (!Array.isArray(items) || items.length === 0) return null
+                                    const sortedItems = [...items].sort((a, b) => {
+                                        const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime()
+                                        const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime()
+                                        return dateA - dateB
+                                    })
 
-                                    const latestItem = items[items.length - 1] // Last item is the latest
+                                    const latestItem = sortedItems[sortedItems.length - 1]
                                     const isExpanded = expandedThreads.has(threadId)
-                                    const hasMultipleVersions = items.length > 1
+                                    const hasMultipleVersions = sortedItems.length > 1
                                     const workoutType = getWorkoutType(latestItem.user_inputs)
                                     const isSelected = selectedItem === latestItem.execution_id
                                     const primaryDisplayField = getPrimaryDisplayField(latestItem.user_inputs)
@@ -463,7 +511,7 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
                                                     {hasMultipleVersions && (
                                                         <div className="mb-3">
                                                             <span className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-md text-xs font-medium">
-                                                                {items.length} version{items.length > 1 ? "s" : ""}
+                                                                {sortedItems.length} version{sortedItems.length > 1 ? "s" : ""}
                                                             </span>
                                                         </div>
                                                     )}
@@ -489,7 +537,7 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
                                             {/* Version Dropdown */}
                                             {isExpanded && hasMultipleVersions && (
                                                 <div className="ml-6 space-y-2 border-l-2 border-indigo-200 pl-4">
-                                                    {items
+                                                    {sortedItems
                                                         .slice(0, -1)
                                                         .reverse()
                                                         .map((item, index) => {
@@ -549,7 +597,9 @@ const WorkoutHistorySidebar: React.FC<WorkoutHistorySidebarProps> = ({
                     )}
                 </div>
             </div>
-        </div>
+            </div>
+            <PopupLoader open={showHistoryLoader} label="Loading history…" />
+        </>
     )
 }
 
