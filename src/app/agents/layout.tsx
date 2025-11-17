@@ -1,0 +1,141 @@
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "../globals.css";
+import { Suspense } from "react";
+import { Toaster } from "@/components/ui/toaster";
+import GoogleAnalytics from "@/components/GoogleAnalytics";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+    title: {
+        default: "Tryzent - Discover & Use AI Solutions for Every Use Case",
+        template: "%s | Tryzent"
+    },
+    description: "Explore a comprehensive marketplace of specialized AI agents tailored for business, creativity, automation, and more. Find the perfect AI solution for your specific needs and boost productivity instantly.",
+    keywords: [
+        "AI agents",
+        "artificial intelligence",
+        "AI marketplace",
+        "automation tools",
+        "business AI",
+        "AI solutions",
+        "machine learning",
+        "AI assistant",
+        "workflow automation",
+        "AI platform",
+        "intelligent agents",
+        "AI services",
+        "AI agents marketplace",
+        "AI agents for business",
+        "AI agents for creativity",
+        "AI agents for automation",
+        "AI agents for productivity",
+        "AI agents for marketing",
+        "AI agents for sales",
+        "AI agents for education",
+        "AI agents for healthcare",
+        "AI agents for finance",
+        "AI agents for legal",
+        "AI agents for HR",
+        "AI agents for customer service",
+        "AI agents for IT",
+        "AI agents for real estate",
+        "AI agents for travel",
+        "AI agents for entertainment",
+        "AI agents for gaming",
+        "AI agents for social media",
+        "AI agents for content creation",
+        "AI agents for research",
+        "AI agents for writing",
+        "AI agents for translation",
+        "AI agents for voice acting",
+        "AI agents for video editing",
+        "AI agents for music production",
+        "AI agents for coding",
+        "Agentic Workflow"
+    ],
+    authors: [{ name: "Tryzent Team" }],
+    creator: "Tryzent",
+    publisher: "Tryzent",
+    metadataBase: new URL("https://agents.tryzent.com"),
+    robots: {
+        index: true,
+        follow: true,
+        googleBot: {
+            index: true,
+            follow: true,
+            "max-video-preview": -1,
+            "max-image-preview": "large",
+            "max-snippet": -1,
+        },
+    },
+    openGraph: {
+        type: "website",
+        locale: "en_US",
+        url: "https://agents.tryzent.com",
+        siteName: "Tryzent",
+        title: "Tryzent - Discover & Deploy AI Solutions for Every Use Case",
+        description: "Explore a comprehensive marketplace of specialized AI agents tailored for business, creativity, automation, and more. Find the perfect AI solution for your specific needs.",
+        images: [
+            {
+                url: "https://agents.tryzent.com/og-image.png", // Must be a full URL
+                width: 1200,
+                height: 630,
+                alt: "Tryzent - Marketplace for AI Solutions",
+            },
+        ],
+    },
+    twitter: {
+        card: "summary_large_image",
+        title: "Tryzent - Discover & Use AI Solutions",
+        description: "Explore specialized AI agents for business, creativity, and automation. Find your perfect AI solution today.",
+        images: ["https://agents.tryzent.com/og-image.png"], // Full URL
+        creator: "@yourtwitterhandle",
+    },
+    category: "Technology",
+    classification: "AI Platform",
+    alternates: {
+        canonical: "https://agents.tryzent.com", // Replace with your actual domain
+    },
+    verification: {
+        google: "your-google-verification-code", // Add your Google Search Console verification
+        // yandex: "your-yandex-verification-code",
+        // bing: "your-bing-verification-code",
+    },
+    other: {
+        "apple-mobile-web-app-capable": "yes",
+        "apple-mobile-web-app-status-bar-style": "default",
+        "apple-mobile-web-app-title": "Tryzent",
+        "format-detection": "telephone=no",
+        "mobile-web-app-capable": "yes",
+        "msapplication-config": "/browserconfig.xml",
+        "msapplication-TileColor": "#000000",
+        "msapplication-tap-highlight": "no",
+        "theme-color": "#000000",
+    },
+};
+
+export const viewport = {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+};
+
+export default function RootLayout({
+    children,
+}: Readonly<{
+    children: React.ReactNode;
+}>) {
+    return (
+        <html lang="en">
+            <body className={inter.className}>
+                <Suspense fallback={<div></div>}>
+                    <GoogleAnalytics />
+                    {children}
+                    <Toaster />
+                </Suspense>
+            </body>
+        </html>
+    );
+}
