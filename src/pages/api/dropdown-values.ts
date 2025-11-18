@@ -1,114 +1,45 @@
-import type { NextApiRequest, NextApiResponse } from "next"
+// src/pages/api/utilities/dropdown-values.ts
+import type { NextApiRequest, NextApiResponse } from 'next'
 
-interface DropdownApiResponse {
-    status: boolean
-    message: string
-    data: {
-        status: boolean
-        message: string
-        data: string[] | string[][]
-    }
-}
-
-interface ApiError {
-    error: string
-    details?: string
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse<DropdownApiResponse | ApiError>) {
-    if (req.method !== "GET") {
-        return res.status(405).json({ error: "Method not allowed" })
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse
+) {
+    if (req.method !== 'GET') {
+        return res.status(405).json({ error: 'Method not allowed' })
     }
 
     try {
         const { board, grade, subject } = req.query
 
-        // Build the API URL based on provided parameters
-        let apiUrl = "https://agents-api.tryzent.com/api/utilities/Get-dropdown-values"
+        // Build query parameters
         const params = new URLSearchParams()
+        if (board) params.append('board', board as string)
+        if (grade) params.append('grade', grade as string)
+        if (subject) params.append('subject', subject as string)
 
-        if (board && typeof board === "string") {
-            params.append("board", board)
-        }
-        if (grade && typeof grade === "string") {
-            params.append("grade", grade)
-        }
-        if (subject && typeof subject === "string") {
-            params.append("subject", subject)
-        }
+        const queryString = params.toString()
+        const url = `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/utilities/Get-dropdown-values${queryString ? `?${queryString}` : ''}`
 
-        if (params.toString()) {
-            apiUrl += `?${params.toString()}`
-        }
-
-        console.log("Fetching from API:", apiUrl)
-
-        const response = await fetch(apiUrl, {
-            method: "GET",
+        const response = await fetch(url, {
+            method: 'GET',
             headers: {
-                accept: "application/json",
-                "Content-Type": "application/json",
-            },
-            // Add timeout to prevent hanging requests
-            signal: AbortSignal.timeout(10000), // 10 seconds timeout
+                'accept': 'application/json'
+            }
         })
 
+        const data = await response.json()
+
         if (!response.ok) {
-            throw new Error(`API request failed with status: ${response.status}`)
+            return res.status(response.status).json(data)
         }
 
-        const data: DropdownApiResponse = await response.json()
-
-        // Validate the response structure
-        if (!data.status || !data.data || !data.data.status) {
-            throw new Error("Invalid API response structure")
-        }
-
-        // Sort the data in ascending order
-        let sortedData = data.data.data
-
-        if (Array.isArray(sortedData)) {
-            if (sortedData.length > 0 && Array.isArray(sortedData[0])) {
-                // For chapters data (array of arrays), sort by the first element (chapter number)
-                sortedData = sortedData.sort((a: any, b: any) => {
-                    const aNum = Number.parseInt(a[0])
-                    const bNum = Number.parseInt(b[0])
-                    if (!isNaN(aNum) && !isNaN(bNum)) {
-                        return aNum - bNum
-                    }
-                    return a[0].localeCompare(b[0])
-                })
-            } else {
-                // For simple arrays (board, grade, subject), sort normally
-                sortedData = sortedData.sort((a: any, b: any) => {
-                    const aNum = Number.parseInt(a)
-                    const bNum = Number.parseInt(b)
-                    if (!isNaN(aNum) && !isNaN(bNum)) {
-                        return aNum - bNum
-                    }
-                    return a.localeCompare(b)
-                })
-            }
-        }
-
-        // Return the sorted data
-        const responseData: DropdownApiResponse = {
-            ...data,
-            data: {
-                ...data.data,
-                data: sortedData,
-            },
-        }
-
-        res.status(200).json(responseData)
+        return res.status(200).json(data)
     } catch (error) {
-        console.error("Dropdown API Error:", error)
-
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
-
-        res.status(500).json({
-            error: "Failed to fetch dropdown values",
-            details: errorMessage,
+        console.error('Dropdown Values API Error:', error)
+        return res.status(500).json({
+            error: 'Internal server error',
+            message: 'Failed to fetch dropdown values'
         })
     }
 }
